@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WiFi Analyzer AI | Analizador Corporativo de Red</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-1: #0a0a0f;
+      --bg-2: #11111a;
+      --bg-3: #1a1a2e;
+      --glass: rgba(255,255,255,0.04);
+      --glass-border: rgba(255,255,255,0.08);
+      --accent-cyan: #22d3ee;
+      --accent-blue: #3b82f6;
+      --accent-purple: #8b5cf6;
+      --accent-rose: #f43f5e;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-1);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Fondo animado */
+    .bg-glow {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+    .bg-glow::before {
+      content: '';
+      position: absolute;
+      top: -10%;
+      left: 20%;
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(34,211,238,0.08) 0%, transparent 70%);
+      animation: float 12s ease-in-out infinite;
+    }
+    .bg-glow::after {
+      content: '';
+      position: absolute;
+      bottom: -10%;
+      right: 10%;
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, rgba(139,92,246,0.07) 0%, transparent 70%);
+      animation: float 14s ease-in-out infinite reverse;
+    }
+    @keyframes float {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33% { transform: translate(30px, -40px) scale(1.05); }
+      66% { transform: translate(-20px, 20px) scale(0.95); }
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 48px 20px 80px;
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+    .logo-icon {
+      width: 48px; height: 48px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 30px rgba(34,211,238,0.25);
+    }
+    .logo-icon svg { width: 24px; height: 24px; color: #fff; }
+    .logo h1 {
+      font-size: 1.6rem;
+      font-weight: 800;
+      background: linear-gradient(90deg, #fff, #94a3b8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    header p {
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      letter-spacing: 0.5px;
+    }
+
+    /* Microventana (Card) */
+    .card {
+      background: var(--glass);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      padding: 32px;
+      margin-bottom: 28px;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      animation: fadeInUp 0.8s ease both;
+    }
+    .card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.06);
+    }
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+    }
+    .card-accent-top {
+      position: absolute;
+      top: 0; left: 32px;
+      width: 60px; height: 3px;
+      border-radius: 0 0 4px 4px;
+      background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+    }
+
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .card-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 24px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .card-title .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+      box-shadow: 0 0 12px rgba(34,211,238,0.5);
+    }
+
+    /* Grid de datos */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .field {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 16px;
+      padding: 18px 20px;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .field:hover {
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.1);
+    }
+    .field-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .field-label svg { width: 14px; height: 14px; opacity: 0.6; }
+    .field-value {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #fff;
+      word-break: break-word;
+    }
+    .field-value.dim { color: var(--text-muted); font-size: 1rem; }
+    .badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 20px;
+      margin-top: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .badge-local {
+      background: rgba(16,185,129,0.12);
+      color: #34d399;
+      border: 1px solid rgba(16,185,129,0.2);
+    }
+    .badge-public {
+      background: rgba(244,63,94,0.12);
+      color: #fb7185;
+      border: 1px solid rgba(244,63,94,0.2);
+    }
+
+    /* Boton */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 32px;
+      border-radius: 14px;
+      border: none;
+      font-family: inherit;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #fff;
+      cursor: pointer;
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+      box-shadow: 0 8px 32px rgba(59,130,246,0.3);
+      transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
+      margin-top: 24px;
+    }
+    .btn:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(59,130,246,0.4); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn svg { width: 20px; height: 20px; }
+    .btn-spin svg { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Estados */
+    .empty-state {
+      text-align: center;
+      padding: 48px 20px;
+      color: var(--text-dim);
+    }
+    .empty-state svg {
+      width: 56px; height: 56px;
+      margin-bottom: 16px;
+      opacity: 0.3;
+    }
+    .empty-state p { font-size: 0.95rem; }
+
+    /* Loading overlay */
+    .loading-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(10,10,15,0.7);
+      backdrop-filter: blur(8px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 10;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s;
+    }
+    .loading-overlay.active { opacity: 1; pointer-events: all; }
+    .spinner {
+      width: 44px; height: 44px;
+      border: 3px solid rgba(255,255,255,0.1);
+      border-top-color: var(--accent-cyan);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    .loading-overlay p { color: var(--text-muted); font-size: 0.9rem; font-weight: 500; }
+
+    /* Card 2 placeholder */
+    .placeholder-lines {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .ph-line {
+      height: 14px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.04);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .ph-line:nth-child(1) { width: 40%; }
+    .ph-line:nth-child(2) { width: 70%; animation-delay: 0.2s; }
+    .ph-line:nth-child(3) { width: 55%; animation-delay: 0.4s; }
+    .ph-line:nth-child(4) { width: 85%; animation-delay: 0.6s; }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 0.8; }
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 40px;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      letter-spacing: 0.5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+
+  <div class="container">
+    <header>
+      <div class="logo">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+        </div>
+        <h1>WiFi Analyzer AI</h1>
+      </div>
+      <p>Analizador inteligente de red local</p>
+    </header>
+
+    <!-- Microventana 1: Informacion del router / red -->
+    <div class="card" id="card-red" style="animation-delay: 0.1s;">
+      <div class="card-accent-top"></div>
+      <div class="card-title"><span class="dot"></span> Informacion del router / red</div>
+
+      <div class="loading-overlay" id="loading-red">
+        <div class="spinner"></div>
+        <p>Escaneando red automáticamente...</p>
+      </div>
+
+      <div id="contenido-red">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+          <p>Presiona el boton para escanear tu red WiFi</p>
+        </div>
+      </div>
+
+      <div style="text-align: center;">
+        <button class="btn" id="btn-escanear" onclick="escanearRed()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>
+          <span>Escanear Red</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Microventana 2: Vacia (placeholder) -->
+    <div class="card" style="animation-delay: 0.25s;">
+      <div class="card-accent-top" style="background: linear-gradient(90deg, var(--accent-purple), var(--accent-rose));"></div>
+      <div class="card-title"><span class="dot" style="background: linear-gradient(135deg, var(--accent-purple), var(--accent-rose)); box-shadow: 0 0 12px rgba(139,92,246,0.5);"></span> Dispositivos & Analisis Avanzado</div>
+      <div class="placeholder-lines">
+        <div class="ph-line"></div>
+        <div class="ph-line"></div>
+        <div class="ph-line"></div>
+        <div class="ph-line"></div>
+      </div>
+      <div style="text-align: center; margin-top: 24px;">
+        <span style="font-size: 0.8rem; color: var(--text-dim); font-weight: 500;">Sección en desarrollo</span>
+      </div>
+    </div>
+
+    <footer>
+      WiFi Analyzer AI v1.0 &middot; Datos recolectados localmente &middot; Conectado a LM Studio localhost:1234
+    </footer>
+  </div>
+
+  <script>
+    async function escanearRed() {
+      const btn = document.getElementById('btn-escanear');
+      const loading = document.getElementById('loading-red');
+      const cont = document.getElementById('contenido-red');
+
+      btn.disabled = true;
+      btn.querySelector('span').textContent = 'Escaneando...';
+      btn.classList.add('btn-spin');
+      loading.classList.add('active');
+
+      try {
+        const res = await fetch('/api/scan');
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'Error del servidor');
+        renderDatos(json.data);
+      } catch (err) {
+        cont.innerHTML = `
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <p style="color: #fb7185;">Error: ${err.message}</p>
+            <p style="font-size:0.8rem; margin-top:8px;">Asegúrate de que el servidor esté corriendo (node server.js)</p>
+          </div>
+        `;
+      } finally {
+        btn.disabled = false;
+        btn.querySelector('span').textContent = 'Escanear Red';
+        btn.classList.remove('btn-spin');
+        loading.classList.remove('active');
+      }
+    }
+
+    function renderDatos(d) {
+      const wifi = d.red;
+      const ip = d.ip;
+      document.getElementById('contenido-red').innerHTML = `
+        <div class="grid">
+          <div class="field">
+            <div class="field-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/></svg> Nombre de Red (SSID)</div>
+            <div class="field-value">${wifi.nombre}</div>
+          </div>
+          <div class="field">
+            <div class="field-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> Tecnología WiFi</div>
+            <div class="field-value">${wifi.tecnologia}</div>
+          </div>
+          <div class="field">
+            <div class="field-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg> Canal</div>
+            <div class="field-value">${wifi.canal}</div>
+          </div>
+          <div class="field">
+            <div class="field-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Señal</div>
+            <div class="field-value">${wifi.senial}</div>
+          </div>
+          <div class="field">
+            <div class="field-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Estado</div>
+            <div class="field-value" style="color: #34d399;">${wifi.estado}</div>
+          </div>
+          <div class="field">
+            <div class="field-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Tipo de Red</div>
+            <div class="field-value dim">${ip.esRedLocal === 'Si' ? 'Local (Privada)' : 'Pública'}</div>
+            <span class="badge ${ip.esRedLocal === 'Si' ? 'badge-local' : 'badge-public'}">${ip.esRedLocal === 'Si' ? 'Protegida' : 'Atención'}</span>
+          </div>
+          <div class="field">
+            <div class="field-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/></svg> IP Local</div>
+            <div class="field-value" style="font-family: monospace; font-size: 1.05rem;">${ip.direccion}</div>
+          </div>
+          <div class="field">
+            <div class="field-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> Gateway</div>
+            <div class="field-value" style="font-family: monospace; font-size: 1.05rem;">${ip.gateway}</div>
+          </div>
+          <div class="field">
+            <div class="field-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg> Máscara</div>
+            <div class="field-value dim">/${ip.mascara}</div>
+          </div>
+          <div class="field">
+            <div class="field-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> MAC Interfaz</div>
+            <div class="field-value dim" style="font-family: monospace; font-size: 0.85rem;">${wifi.mac}</div>
+          </div>
+          <div class="field">
+            <div class="field-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/></svg> BSSID (Router)</div>
+            <div class="field-value dim" style="font-family: monospace; font-size: 0.85rem;">${wifi.bssid}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Auto-scan al cargar
+    window.addEventListener('DOMContentLoaded', () => {
+      escanearRed();
+    });
+  </script>
+</body>
+</html>

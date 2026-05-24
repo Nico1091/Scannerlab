@@ -1,0 +1,24 @@
+Reporte de Red WiFi
+Generado: 24/5/2026, 17:53:39
+================================================
+
+RED WiFi
+------------------------------------------------
+Nombre de red (SSID) : Laura Montoya
+BSSID               : 58:9b:f7:87:5e:58
+Tecnologia          : 802.11n
+Canal               : 3
+Senial              : 83%
+Recepcion           : 130 Mbps
+Transmision         : 144 Mbps
+Estado              : conectado
+MAC interfaz        : N/A
+
+CONFIGURACION IP
+------------------------------------------------
+Direccion IPv4      : 192.168.20.60
+Mascara de subred   : 24
+Gateway (puerta)    : 192.168.20.1
+Es red local?       : Si
+
+================================================
