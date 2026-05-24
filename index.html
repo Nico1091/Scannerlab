@@ -281,6 +281,126 @@
     }
     .loading-overlay p { color: var(--text-muted); font-size: 0.9rem; font-weight: 500; }
 
+    /* Sub-microventanas dentro de card */
+    .sub-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .sub-card {
+      background: rgba(255,255,255,0.025);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 18px;
+      padding: 22px;
+      position: relative;
+      overflow: hidden;
+    }
+    .sub-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 20px;
+      width: 40px; height: 2px;
+      border-radius: 0 0 4px 4px;
+      background: linear-gradient(90deg, var(--accent-purple), var(--accent-rose));
+    }
+    .sub-card-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+    .sub-card-title .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent-purple), var(--accent-rose));
+      box-shadow: 0 0 8px rgba(139,92,246,0.4);
+    }
+    .device-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .device-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 12px;
+      transition: background 0.2s;
+    }
+    .device-item:hover { background: rgba(255,255,255,0.06); }
+    .device-icon {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .device-icon svg { width: 18px; height: 18px; color: var(--text-muted); }
+    .device-info { flex: 1; min-width: 0; }
+    .device-ip {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #fff;
+      font-family: monospace;
+    }
+    .device-meta {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+    .device-badge {
+      font-size: 0.6rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+    .badge-router {
+      background: rgba(59,130,246,0.12);
+      color: #60a5fa;
+      border: 1px solid rgba(59,130,246,0.2);
+    }
+    .badge-pc {
+      background: rgba(34,211,238,0.12);
+      color: #67e8f9;
+      border: 1px solid rgba(34,211,238,0.2);
+    }
+    .badge-phone {
+      background: rgba(139,92,246,0.12);
+      color: #a78bfa;
+      border: 1px solid rgba(139,92,246,0.2);
+    }
+    .badge-generic {
+      background: rgba(255,255,255,0.05);
+      color: var(--text-muted);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .count-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 22px;
+      height: 22px;
+      padding: 0 7px;
+      border-radius: 11px;
+      background: rgba(255,255,255,0.08);
+      font-size: 0.7rem;
+      font-weight: 800;
+      color: #fff;
+      margin-left: auto;
+    }
+
     /* Card 2 placeholder */
     .placeholder-lines {
       display: flex;
@@ -350,18 +470,41 @@
       </div>
     </div>
 
-    <!-- Microventana 2: Vacia (placeholder) -->
+    <!-- Microventana 2: Dispositivos separados en sub-microventanas -->
     <div class="card" style="animation-delay: 0.25s;">
       <div class="card-accent-top" style="background: linear-gradient(90deg, var(--accent-purple), var(--accent-rose));"></div>
       <div class="card-title"><span class="dot" style="background: linear-gradient(135deg, var(--accent-purple), var(--accent-rose)); box-shadow: 0 0 12px rgba(139,92,246,0.5);"></span> Dispositivos & Analisis Avanzado</div>
-      <div class="placeholder-lines">
-        <div class="ph-line"></div>
-        <div class="ph-line"></div>
-        <div class="ph-line"></div>
-        <div class="ph-line"></div>
+
+      <div class="loading-overlay" id="loading-devices">
+        <div class="spinner"></div>
+        <p>Detectando dispositivos en la red...</p>
       </div>
-      <div style="text-align: center; margin-top: 24px;">
-        <span style="font-size: 0.8rem; color: var(--text-dim); font-weight: 500;">Sección en desarrollo</span>
+
+      <div id="contenido-devices" class="sub-grid">
+        <!-- Se llena dinamicamente -->
+        <div class="sub-card" id="sub-router">
+          <div class="sub-card-title"><span class="dot"></span> Router / Gateway <span class="count-pill" id="count-router">0</span></div>
+          <div class="device-list" id="list-router"><span style="color: var(--text-dim); font-size: 0.8rem;">Sin datos</span></div>
+        </div>
+        <div class="sub-card" id="sub-pc">
+          <div class="sub-card-title"><span class="dot"></span> PCs & Laptops <span class="count-pill" id="count-pc">0</span></div>
+          <div class="device-list" id="list-pc"><span style="color: var(--text-dim); font-size: 0.8rem;">Sin datos</span></div>
+        </div>
+        <div class="sub-card" id="sub-movil">
+          <div class="sub-card-title"><span class="dot"></span> Moviles & Tablets <span class="count-pill" id="count-movil">0</span></div>
+          <div class="device-list" id="list-movil"><span style="color: var(--text-dim); font-size: 0.8rem;">Sin datos</span></div>
+        </div>
+        <div class="sub-card" id="sub-otros">
+          <div class="sub-card-title"><span class="dot"></span> Otros / Desconocidos <span class="count-pill" id="count-otros">0</span></div>
+          <div class="device-list" id="list-otros"><span style="color: var(--text-dim); font-size: 0.8rem;">Sin datos</span></div>
+        </div>
+      </div>
+
+      <div style="text-align: center;">
+        <button class="btn" id="btn-devices" onclick="escanearDispositivos()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>
+          <span>Buscar Dispositivos</span>
+        </button>
       </div>
     </div>
 
@@ -456,9 +599,84 @@
       `;
     }
 
+    async function escanearDispositivos() {
+      const btn = document.getElementById('btn-devices');
+      const loading = document.getElementById('loading-devices');
+
+      btn.disabled = true;
+      btn.querySelector('span').textContent = 'Buscando...';
+      btn.classList.add('btn-spin');
+      loading.classList.add('active');
+
+      try {
+        const res = await fetch('/api/devices');
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'Error del servidor');
+        renderDispositivos(json.data);
+      } catch (err) {
+        document.getElementById('contenido-devices').innerHTML = `
+          <div class="empty-state" style="grid-column: 1 / -1;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <p style="color: #fb7185;">Error: ${err.message}</p>
+          </div>
+        `;
+      } finally {
+        btn.disabled = false;
+        btn.querySelector('span').textContent = 'Buscar Dispositivos';
+        btn.classList.remove('btn-spin');
+        loading.classList.remove('active');
+      }
+    }
+
+    function renderDispositivos(lista) {
+      const categorias = {
+        'Router / Gateway': { id: 'router', badge: 'badge-router', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Dispositivo Apple': { id: 'pc', badge: 'badge-pc', icon: 'M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 18V6h16v12H4z' },
+        'Dispositivo Samsung': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Máquina Virtual': { id: 'pc', badge: 'badge-pc', icon: 'M22 17H2a3 3 0 0 0 3-3V9a7 7 0 0 1 14 0v5a3 3 0 0 0 3 3zm-10.83-4.93A4.98 4.98 0 0 1 7 10V9a5 5 0 0 1 10 0v1c0 1.2-.54 2.27-1.39 2.98l.56 2.94z' },
+        'Router / AP': { id: 'router', badge: 'badge-router', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Dispositivo Genérico': { id: 'otros', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+      };
+
+      // Limpiar listas
+      for (const k of ['router','pc','movil','otros']) {
+        document.getElementById('list-' + k).innerHTML = '';
+        document.getElementById('count-' + k).textContent = '0';
+      }
+
+      const counts = { router: 0, pc: 0, movil: 0, otros: 0 };
+
+      for (const d of lista) {
+        const conf = categorias[d.tipo] || { id: 'otros', badge: 'badge-generic', icon: categorias['Dispositivo Genérico'].icon };
+        counts[conf.id]++;
+        const list = document.getElementById('list-' + conf.id);
+        const item = document.createElement('div');
+        item.className = 'device-item';
+        item.innerHTML = `
+          <div class="device-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${conf.icon}"/></svg>
+          </div>
+          <div class="device-info">
+            <div class="device-ip">${d.ip}</div>
+            <div class="device-meta">${d.mac} &middot; ${d.fabricante}</div>
+          </div>
+          <span class="device-badge ${conf.badge}">${d.estado}</span>
+        `;
+        list.appendChild(item);
+      }
+
+      for (const k of ['router','pc','movil','otros']) {
+        document.getElementById('count-' + k).textContent = counts[k];
+        if (counts[k] === 0) {
+          document.getElementById('list-' + k).innerHTML = '<span style="color: var(--text-dim); font-size: 0.8rem;">Sin dispositivos detectados</span>';
+        }
+      }
+    }
+
     // Auto-scan al cargar
     window.addEventListener('DOMContentLoaded', () => {
       escanearRed();
+      escanearDispositivos();
     });
   </script>
 </body>
