@@ -865,12 +865,9 @@ function scanPort(ip, port, timeout = 1500) {
 
 async function scanPorts(ip) {
   const commonPorts = [22, 23, 80, 443, 445, 3389, 5000, 5001, 5555, 62078, 8080, 8443, 32400, 8123];
-  const results = [];
-  for (const port of commonPorts) {
-    const res = await scanPort(ip, port, 1000);
-    if (res.open) results.push(port);
-  }
-  return results;
+  // Paralelizar escaneo de todos los puertos de la IP al mismo tiempo
+  const results = await Promise.all(commonPorts.map(port => scanPort(ip, port, 800)));
+  return results.filter(r => r.open).map(r => r.port);
 }
 
 async function grabBanner(ip, port, timeout = 1500) {
@@ -959,7 +956,7 @@ function detectarTipo(fabricante, ip, gatewayIp) {
   return 'Dispositivo Genérico';
 }
 
-function ping(ip, timeout = 500) {
+function ping(ip, timeout = 300) {
   return new Promise((resolve) => {
     exec(`ping -n 1 -w ${timeout} ${ip}`, { encoding: 'utf-8' }, (err) => {
       resolve(!err); // true si respondió
@@ -971,18 +968,35 @@ async function pingSweep(subnet, onProgress) {
   const ips = [];
   for (let i = 1; i <= 254; i++) ips.push(`${subnet}.${i}`);
 
-  const batchSize = 30;
+  const batchSize = 50; // Aumentado de 30 a 50 para mas paralelismo
   const activos = [];
   for (let i = 0; i < ips.length; i += batchSize) {
     const batch = ips.slice(i, i + batchSize);
-    const results = await Promise.all(batch.map(ip => ping(ip, 400)));
+    const results = await Promise.all(batch.map(ip => ping(ip, 300)));
     results.forEach((ok, idx) => { if (ok) activos.push(batch[idx]); });
     if (onProgress) onProgress(Math.min(i + batchSize, 254), 254);
   }
   return activos;
 }
 
+// Helper para ejecutar tareas async en batches paralelos
+async function runInBatches(items, fn, batchSize = 10) {
+  const results = {};
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(async (item) => {
+      const result = await fn(item);
+      return { item, result };
+    }));
+    batchResults.forEach(({ item, result }) => {
+      results[item] = result;
+    });
+  }
+  return results;
+}
+
 async function obtenerDispositivos(gatewayIp) {
+  console.time('[Dispositivos] Tiempo total');
   const subnet = gatewayIp.split('.').slice(0, 3).join('.');
 
   // 1. Descubrir dispositivos UPnP en paralelo con ping sweep
@@ -1014,40 +1028,35 @@ async function obtenerDispositivos(gatewayIp) {
     if (!activos.includes(ip)) activos.push(ip);
   }
 
-  // 6. Obtener hostname de cada IP (con UPnP como hint)
+  // 6. Obtener hostname de cada IP (con UPnP como hint) - PARALELO con batches de 10
   console.log(`[Dispositivos] Resolviendo nombres de ${activos.length} hosts...`);
-  const hostMap = {};
-  for (const ip of activos) {
-    hostMap[ip] = await getHostname(ip, upnpDevices);
-  }
+  const hostMap = await runInBatches(activos, ip => getHostname(ip, upnpDevices), 10);
 
-  // 7. Scan de puertos para identificar dispositivos
+  // 7. Scan de puertos para identificar dispositivos - PARALELO con batches de 10
   console.log(`[Dispositivos] Escaneando puertos de ${activos.length} hosts...`);
-  const portMap = {};
-  for (const ip of activos) {
-    portMap[ip] = await scanPorts(ip);
-    if (portMap[ip].length > 0) {
-      console.log(`[Dispositivos] ${ip} puertos abiertos: ${portMap[ip].join(', ')}`);
+  const portMap = await runInBatches(activos, async (ip) => {
+    const ports = await scanPorts(ip);
+    if (ports.length > 0) {
+      console.log(`[Dispositivos] ${ip} puertos abiertos: ${ports.join(', ')}`);
     }
-  }
+    return ports;
+  }, 10);
 
-  // 8. TTL OS Fingerprinting
+  // 8. TTL OS Fingerprinting - PARALELO con batches de 15
   console.log(`[Dispositivos] Obteniendo TTL de ${activos.length} hosts...`);
-  const ttlMap = {};
-  for (const ip of activos) {
-    ttlMap[ip] = await getTTLFromPing(ip);
-    if (ttlMap[ip]) {
-      const osGuess = detectOSByTTL(ttlMap[ip]);
-      console.log(`[Dispositivos] ${ip} TTL=${ttlMap[ip]} -> ${osGuess ? osGuess.os : 'Desconocido'}`);
+  const ttlMap = await runInBatches(activos, async (ip) => {
+    const ttl = await getTTLFromPing(ip);
+    if (ttl) {
+      const osGuess = detectOSByTTL(ttl);
+      console.log(`[Dispositivos] ${ip} TTL=${ttl} -> ${osGuess ? osGuess.os : 'Desconocido'}`);
     }
-  }
+    return ttl;
+  }, 15);
 
-  // 9. Forzar ARP resolution
+  // 9. Forzar ARP resolution - PARALELO con batches de 20
   console.log(`[Dispositivos] Forzando ARP para ${activos.length} hosts...`);
-  for (const ip of activos) {
-    try { await run(`ping -n 1 -w 300 ${ip}`); } catch (_) {}
-  }
-  await new Promise(r => setTimeout(r, 1200));
+  await runInBatches(activos, ip => run(`ping -n 1 -w 200 ${ip}`).catch(() => null), 20);
+  await new Promise(r => setTimeout(r, 800));
 
   // 10. Leer tabla ARP
   const arpOut = await run('arp -a');
@@ -1103,6 +1112,7 @@ async function obtenerDispositivos(gatewayIp) {
     });
   }
 
+  console.timeEnd('[Dispositivos] Tiempo total');
   return dispositivos.sort((a, b) => {
     if (a.tipo === 'Router / Gateway') return -1;
     if (b.tipo === 'Router / Gateway') return 1;
