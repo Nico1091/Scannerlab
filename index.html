@@ -96,6 +96,7 @@
       font-weight: 800;
       background: linear-gradient(90deg, #fff, #94a3b8);
       -webkit-background-clip: text;
+      background-clip: text;
       -webkit-text-fill-color: transparent;
     }
     header p {
@@ -352,6 +353,12 @@
       color: #fff;
       font-family: monospace;
     }
+    .device-hostname {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #c7d2fe;
+      margin-top: 2px;
+    }
     .device-meta {
       font-size: 0.7rem;
       color: var(--text-dim);
@@ -494,6 +501,18 @@
           <div class="sub-card-title"><span class="dot"></span> Moviles & Tablets <span class="count-pill" id="count-movil">0</span></div>
           <div class="device-list" id="list-movil"><span style="color: var(--text-dim); font-size: 0.8rem;">Sin datos</span></div>
         </div>
+        <div class="sub-card" id="sub-smarttv">
+          <div class="sub-card-title"><span class="dot"></span> Smart TVs <span class="count-pill" id="count-smarttv">0</span></div>
+          <div class="device-list" id="list-smarttv"><span style="color: var(--text-dim); font-size: 0.8rem;">Sin datos</span></div>
+        </div>
+        <div class="sub-card" id="sub-nas">
+          <div class="sub-card-title"><span class="dot"></span> NAS / Servidores <span class="count-pill" id="count-nas">0</span></div>
+          <div class="device-list" id="list-nas"><span style="color: var(--text-dim); font-size: 0.8rem;">Sin datos</span></div>
+        </div>
+        <div class="sub-card" id="sub-iot">
+          <div class="sub-card-title"><span class="dot"></span> Smart Home / IoT <span class="count-pill" id="count-iot">0</span></div>
+          <div class="device-list" id="list-iot"><span style="color: var(--text-dim); font-size: 0.8rem;">Sin datos</span></div>
+        </div>
         <div class="sub-card" id="sub-otros">
           <div class="sub-card-title"><span class="dot"></span> Otros / Desconocidos <span class="count-pill" id="count-otros">0</span></div>
           <div class="device-list" id="list-otros"><span style="color: var(--text-dim); font-size: 0.8rem;">Sin datos</span></div>
@@ -631,20 +650,53 @@
     function renderDispositivos(lista) {
       const categorias = {
         'Router / Gateway': { id: 'router', badge: 'badge-router', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
-        'Dispositivo Apple': { id: 'pc', badge: 'badge-pc', icon: 'M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 18V6h16v12H4z' },
-        'Dispositivo Samsung': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
-        'Máquina Virtual': { id: 'pc', badge: 'badge-pc', icon: 'M22 17H2a3 3 0 0 0 3-3V9a7 7 0 0 1 14 0v5a3 3 0 0 0 3 3zm-10.83-4.93A4.98 4.98 0 0 1 7 10V9a5 5 0 0 1 10 0v1c0 1.2-.54 2.27-1.39 2.98l.56 2.94z' },
         'Router / AP': { id: 'router', badge: 'badge-router', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Dispositivo Apple': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Dispositivo Samsung': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Dispositivo Xiaomi / Redmi': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Dispositivo Huawei / Honor': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Dispositivo OPPO': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Dispositivo Vivo': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Dispositivo OnePlus': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Dispositivo Realme': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Dispositivo Motorola': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Dispositivo LG': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Dispositivo Sony': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Dispositivo Nokia': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'Movil/Tablet': { id: 'movil', badge: 'badge-phone', icon: 'M12 18h.01M8 21h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z' },
+        'PC / Laptop': { id: 'pc', badge: 'badge-pc', icon: 'M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 18V6h16v12H4z' },
+        'Windows PC': { id: 'pc', badge: 'badge-pc', icon: 'M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 18V6h16v12H4z' },
+        'Servidor / Linux': { id: 'nas', badge: 'badge-pc', icon: 'M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 18V6h16v12H4z' },
+        'Servidor SSH': { id: 'nas', badge: 'badge-pc', icon: 'M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 18V6h16v12H4z' },
+        'Máquina Virtual': { id: 'pc', badge: 'badge-pc', icon: 'M22 17H2a3 3 0 0 0 3-3V9a7 7 0 0 1 14 0v5a3 3 0 0 0 3 3zm-10.83-4.93A4.98 4.98 0 0 1 7 10V9a5 5 0 0 1 10 0v1c0 1.2-.54 2.27-1.39 2.98l.56 2.94z' },
+        'NAS / Servidor': { id: 'nas', badge: 'badge-pc', icon: 'M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 18V6h16v12H4z' },
+        'Synology NAS': { id: 'nas', badge: 'badge-pc', icon: 'M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 18V6h16v12H4z' },
+        'Media Server': { id: 'nas', badge: 'badge-pc', icon: 'M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 18V6h16v12H4z' },
+        'Plex Media Server': { id: 'nas', badge: 'badge-pc', icon: 'M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 18V6h16v12H4z' },
+        'Smart Home': { id: 'iot', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Home Assistant': { id: 'iot', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Dispositivo Philips Hue': { id: 'iot', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Dispositivo Sonos': { id: 'iot', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Chromecast': { id: 'iot', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Dispositivo Roku': { id: 'iot', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Amazon Fire TV': { id: 'smarttv', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Smart TV Samsung': { id: 'smarttv', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Smart TV LG': { id: 'smarttv', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Smart TV TCL': { id: 'smarttv', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Smart TV Hisense': { id: 'smarttv', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Dispositivo Google / Nest': { id: 'iot', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Dispositivo Amazon / Alexa': { id: 'iot', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+        'Dispositivo con Web': { id: 'otros', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
         'Dispositivo Genérico': { id: 'otros', badge: 'badge-generic', icon: 'M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2zm0 2a8 8 0 0 0-8 8c0 4.418 3.582 8 8 8s8-3.582 8-8-3.582-8-8-8zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
       };
 
       // Limpiar listas
-      for (const k of ['router','pc','movil','otros']) {
+      for (const k of ['router','pc','movil','smarttv','nas','iot','otros']) {
         document.getElementById('list-' + k).innerHTML = '';
         document.getElementById('count-' + k).textContent = '0';
       }
 
-      const counts = { router: 0, pc: 0, movil: 0, otros: 0 };
+      const counts = { router: 0, pc: 0, movil: 0, smarttv: 0, nas: 0, iot: 0, otros: 0 };
 
       for (const d of lista) {
         const conf = categorias[d.tipo] || { id: 'otros', badge: 'badge-generic', icon: categorias['Dispositivo Genérico'].icon };
@@ -658,14 +710,23 @@
           </div>
           <div class="device-info">
             <div class="device-ip">${d.ip}</div>
-            <div class="device-meta">${d.mac} &middot; ${d.fabricante}</div>
+            ${(() => {
+              let name = (d.hostname || 'Desconocido').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+              if (!name || name === 'Desconocido') {
+                if (d.fabricante !== 'Desconocido') name = d.fabricante + ' Device';
+                else if (d.tipo !== 'Dispositivo Genérico') name = d.tipo;
+                else name = 'Dispositivo ' + d.ip.split('.').pop();
+              }
+              return `<div class="device-hostname">${name}</div>`;
+            })()}
+            <div class="device-meta">${d.mac} &middot; ${d.fabricante}${(d.puertos && d.puertos.length > 0) ? ' &middot; Puertos: ' + d.puertos.join(', ') : ''}</div>
           </div>
           <span class="device-badge ${conf.badge}">${d.estado}</span>
         `;
         list.appendChild(item);
       }
 
-      for (const k of ['router','pc','movil','otros']) {
+      for (const k of ['router','pc','movil','smarttv','nas','iot','otros']) {
         document.getElementById('count-' + k).textContent = counts[k];
         if (counts[k] === 0) {
           document.getElementById('list-' + k).innerHTML = '<span style="color: var(--text-dim); font-size: 0.8rem;">Sin dispositivos detectados</span>';

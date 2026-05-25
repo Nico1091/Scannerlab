@@ -1,14 +1,81 @@
 const { exec } = require('child_process');
+const http = require('http');
+const https = require('https');
+const dgram = require('dgram');
+const net = require('net');
 const fs = require('fs');
 const path = require('path');
 
-function run(cmd) {
+function run(cmd, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
-    exec(cmd, { encoding: 'utf-8' }, (err, stdout, stderr) => {
+    exec(cmd, { encoding: 'utf-8', timeout: timeoutMs }, (err, stdout, stderr) => {
       if (err) return reject(stderr || err.message);
       resolve(stdout);
     });
   });
+}
+
+function withTimeout(promise, ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promise.then(result => { clearTimeout(timer); resolve(result); }).catch(() => { clearTimeout(timer); resolve(null); });
+  });
+}
+
+function getHTTPName(ip, useHttps = false) {
+  return new Promise((resolve) => {
+    const proto = useHttps ? require('https') : http;
+    const req = proto.get(`${useHttps ? 'https' : 'http'}://${ip}/`, { timeout: 3000, rejectUnauthorized: false }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { data += chunk; if (data.length > 50000) { req.destroy(); resolve(null); } });
+      res.on('end', () => {
+        const m = data.match(/<title>(.+?)<\/title>/is);
+        if (!m) return resolve(null);
+        let raw = m[1];
+        let title = raw.split(/\r?\n/).join(' ').split(/\r/).join(' ').replace(/\s+/g, ' ').replace(/&nbsp;/g, ' ').trim();
+        // Filtrar titulos claramente genericos/inutiles
+        if (/^\d{3}\s|index of|not found|404|403|error/i.test(title)) return resolve(null);
+        if (title.length > 80 || title.length < 2) return resolve(null);
+        resolve(title);
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.setTimeout(3000);
+  });
+}
+
+async function getLLMNR(ip) {
+  try {
+    const out = await run(`powershell -NoProfile -Command "try { (Resolve-DnsName -Name '${ip}' -LlmnrOnly -ErrorAction Stop).NameHost } catch { '' }"`, 4000);
+    const name = out.trim();
+    return name || null;
+  } catch (_) { return null; }
+}
+
+async function getNetBIOS(ip) {
+  try {
+    const out = await run(`nbtstat -A ${ip}`, 4000);
+    const m = out.match(/(\S+)\s+<00>\s+UNICO/i);
+    return m ? m[1] : null;
+  } catch (_) { return null; }
+}
+
+async function getDNS(ip) {
+  try {
+    const out = await run(`powershell -NoProfile -Command "try { (Resolve-DnsName '${ip}' -ErrorAction Stop).NameHost } catch { '' }"`, 4000);
+    const name = out.trim();
+    return name || null;
+  } catch (_) { return null; }
+}
+
+async function getSNMPName(ip) {
+  try {
+    const out = await run(`powershell -NoProfile -Command "try { snmpget -v2c -c public ${ip} .1.3.6.1.2.1.1.5.0 2>\$null } catch { '' }"`, 4000);
+    const m = out.match(/STRING:\s*"?(.+?)"?\s*$/i);
+    return m ? m[1].trim() : null;
+  } catch (_) { return null; }
 }
 
 function extract(output, regex) {
@@ -291,6 +358,244 @@ const OUI_DB = {
   'F8:CF:C5': 'Samsung', 'F8:D0:BD': 'Samsung', 'F8:E6:1A': 'Samsung',
   'FC:19:10': 'Samsung', 'FC:1F:19': 'Samsung', 'FC:3F:F5': 'Samsung',
   'FC:8F:90': 'Samsung', 'FC:A4:7A': 'Samsung', 'FC:F1:36': 'Samsung',
+  // Xiaomi / Redmi / Poco
+  '50:EC:50': 'Xiaomi', '64:69:4E': 'Xiaomi', '74:23:44': 'Xiaomi', '7C:89:56': 'Xiaomi',
+  '88:C3:97': 'Xiaomi', '98:0D:6E': 'Xiaomi', '9C:99:A0': 'Xiaomi', 'A8:BD:3A': 'Xiaomi',
+  'AC:57:75': 'Xiaomi', 'B0:E2:35': 'Xiaomi', 'C8:14:51': 'Xiaomi', 'D4:97:0B': 'Xiaomi',
+  'E4:FA:ED': 'Xiaomi', 'F4:8C:50': 'Xiaomi', 'F4:F5:DB': 'Xiaomi', 'F8:A3:4F': 'Xiaomi',
+  'F8:BB:BF': 'Xiaomi', '28:D1:27': 'Xiaomi', '34:CE:00': 'Xiaomi', '38:AF:29': 'Xiaomi',
+  '40:31:3C': 'Xiaomi', '50:DC:e7': 'Xiaomi', '58:44:98': 'Xiaomi', '64:b4:5c': 'Xiaomi',
+  '68:DF:DD': 'Xiaomi', '70:EF:00': 'Xiaomi', '78:11:25': 'Xiaomi', '7C:03:D8': 'Xiaomi',
+  '8C:D7:8D': 'Xiaomi', '90:18:AE': 'Xiaomi', '98:0C:82': 'Xiaomi', '9C:2E:94': 'Xiaomi',
+  'A4:77:2F': 'Xiaomi', 'AC:19:F9': 'Xiaomi', 'B0:DC:EF': 'Xiaomi', 'B4:43:0D': 'Xiaomi',
+  'BC:83:AB': 'Xiaomi', 'C4:0B:CB': 'Xiaomi', 'C8:50:E9': 'Xiaomi', 'CC:2D:83': 'Xiaomi',
+  'D0:C5:D3': 'Xiaomi', 'D4:97:0B': 'Xiaomi', 'DC:44:27': 'Xiaomi', 'E0:CC:F8': 'Xiaomi',
+  'E4:0A:11': 'Xiaomi', 'EC:41:18': 'Xiaomi', 'F0:B4:29': 'Xiaomi', 'F4:F5:A5': 'Xiaomi',
+  // Huawei / Honor
+  '00:E0:FC': 'Huawei', '08:19:A6': 'Huawei', '10:47:80': 'Huawei', '10:51:07': 'Huawei',
+  '10:C1:72': 'Huawei', '14:30:04': 'Huawei', '14:CF:92': 'Huawei', '18:DE:D7': 'Huawei',
+  '1C:15:1F': 'Huawei', '1C:AB:34': 'Huawei', '20:0B:C7': 'Huawei', '24:69:A5': 'Huawei',
+  '24:DB:AC': 'Huawei', '28:31:52': 'Huawei', '28:57:46': 'Huawei', '28:A2:BD': 'Huawei',
+  '2C:AB:00': 'Huawei', '30:87:30': 'Huawei', '30:D1:6B': 'Huawei', '38:F2:3E': 'Huawei',
+  '3C:FA:43': 'Huawei', '48:01:C5': 'Huawei', '4C:1F:CC': 'Huawei', '4C:54:99': 'Huawei',
+  '4C:B1:99': 'Huawei', '54:89:98': 'Huawei', '58:25:68': 'Huawei', '5C:4C:A9': 'Huawei',
+  '5C:B3:96': 'Huawei', '5C:B4:24': 'Huawei', '5C:F9:DD': 'Huawei', '60:E7:01': 'Huawei',
+  '64:A6:51': 'Huawei', '70:72:0D': 'Huawei', '70:A8:E3': 'Huawei', '78:F5:E5': 'Huawei',
+  '7C:11:CB': 'Huawei', '7C:46:85': 'Huawei', '80:38:FD': 'Huawei', '80:B6:86': 'Huawei',
+  '84:A8:E4': 'Huawei', '88:53:D4': 'Huawei', '88:CF:98': 'Huawei', '8C:15:C7': 'Huawei',
+  '90:4E:91': 'Huawei', '90:67:B5': 'Huawei', '9C:28:EF': 'Huawei', 'A0:28:ED': 'Huawei',
+  'A4:81:7A': 'Huawei', 'A8:15:4D': 'Huawei', 'AC:85:F3': 'Huawei', 'AC:E2:15': 'Huawei',
+  'B4:30:52': 'Huawei', 'B4:7C:9C': 'Huawei', 'BC:3F:8F': 'Huawei', 'BC:76:70': 'Huawei',
+  'C0:49:EF': 'Huawei', 'C4:0B:CB': 'Huawei', 'C8:1E:E7': 'Huawei', 'CC:05:0F': 'Huawei',
+  'CC:96:A0': 'Huawei', 'D0:16:7A': 'Huawei', 'D0:57:75': 'Huawei', 'D0:7E:28': 'Huawei',
+  'D4:6A:A8': 'Huawei', 'D4:6D:6D': 'Huawei', 'D4:7B:05': 'Huawei', 'D4:94:E8': 'Huawei',
+  'D4:B1:10': 'Huawei', 'D8:06:2A': 'Huawei', 'D8:49:2F': 'Huawei', 'DC:D2:FC': 'Huawei',
+  'E0:24:7F': 'Huawei', 'E0:36:76': 'Huawei', 'E0:9D:31': 'Huawei', 'E0:AC:F1': 'Huawei',
+  'E4:35:C8': 'Huawei', 'E4:60:17': 'Huawei', 'E8:08:8B': 'Huawei', 'EC:23:3D': 'Huawei',
+  'EC:89:14': 'Huawei', 'F0:99:BF': 'Huawei', 'F4:55:9C': 'Huawei', 'F4:CB:5E': 'Huawei',
+  'F4:E3:FB': 'Huawei', 'F8:4A:BF': 'Huawei', 'F8:E8:97': 'Huawei', 'FC:3F:DB': 'Huawei',
+  // OPPO / Realme / OnePlus
+  '00:36:76': 'OPPO', '00:F1:41': 'OPPO', '14:E7:80': 'OPPO', '18:3D:A2': 'OPPO',
+  '1C:68:29': 'OPPO', '20:0B:C7': 'OPPO', '24:69:A5': 'OPPO', '28:3B:82': 'OPPO',
+  '2C:AB:00': 'OPPO', '30:87:30': 'OPPO', '34:6B:D3': 'OPPO', '38:F2:3E': 'OPPO',
+  '3C:FA:43': 'OPPO', '48:01:C5': 'OPPO', '54:89:98': 'OPPO', '58:25:68': 'OPPO',
+  '5C:4C:A9': 'OPPO', '5C:B3:96': 'OPPO', '60:E7:01': 'OPPO', '64:A6:51': 'OPPO',
+  '70:A8:E3': 'OPPO', '78:F5:E5': 'OPPO', '80:38:FD': 'OPPO', '84:A8:E4': 'OPPO',
+  '90:4E:91': 'OPPO', '9C:28:EF': 'OPPO', 'A4:81:7A': 'OPPO', 'AC:85:F3': 'OPPO',
+  'B4:30:52': 'OPPO', 'BC:3F:8F': 'OPPO', 'C8:1E:E7': 'OPPO', 'CC:05:0F': 'OPPO',
+  'CC:96:A0': 'OPPO', 'D0:16:7A': 'OPPO', 'D4:6A:A8': 'OPPO', 'D4:6D:6D': 'OPPO',
+  'D4:94:E8': 'OPPO', 'D8:06:2A': 'OPPO', 'E0:24:7F': 'OPPO', 'E4:35:C8': 'OPPO',
+  'E8:08:8B': 'OPPO', 'F0:99:BF': 'OPPO', 'F4:CB:5E': 'OPPO',
+  // Motorola
+  '00:0C:E5': 'Motorola', '00:0E:5C': 'Motorola', '00:12:0E': 'Motorola',
+  '00:15:1F': 'Motorola', '00:17:E2': 'Motorola', '00:18:82': 'Motorola',
+  '00:1A:1B': 'Motorola', '00:1C:C5': 'Motorola', '00:1E:65': 'Motorola',
+  '00:1F:7E': 'Motorola', '00:21:1E': 'Motorola', '00:22:68': 'Motorola',
+  '00:23:04': 'Motorola', '00:24:8C': 'Motorola', '00:26:68': 'Motorola',
+  '00:3A:9D': 'Motorola', '00:60:37': 'Motorola', '00:80:37': 'Motorola',
+  '00:90:6D': 'Motorola', '04:50:DA': 'Motorola', '08:00:69': 'Motorola',
+  '0C:96:CD': 'Motorola', '10:2E:AF': 'Motorola', '14:1A:A5': 'Motorola',
+  '18:AF:61': 'Motorola', '1C:99:4C': 'Motorola', '24:DA:33': 'Motorola',
+  '28:27:BF': 'Motorola', '2C:1E:4F': 'Motorola', '34:23:87': 'Motorola',
+  '38:94:96': 'Motorola', '3C:43:8E': 'Motorola', '40:78:93': 'Motorola',
+  '44:A7:28': 'Motorola', '48:27:E4': 'Motorola', '4C:10:A5': 'Motorola',
+  '50:1A:C5': 'Motorola', '54:60:09': 'Motorola', '58:20:59': 'Motorola',
+  '5C:3A:45': 'Motorola', '60:A4:D0': 'Motorola', '64:B4:73': 'Motorola',
+  '68:35:EB': 'Motorola', '6C:AD:94': 'Motorola', '70:72:CF': 'Motorola',
+  '74:AC:88': 'Motorola', '78:28:CA': 'Motorola', '7C:25:05': 'Motorola',
+  '80:82:77': 'Motorola', '84:38:35': 'Motorola', '88:44:77': 'Motorola',
+  '8C:95:7F': 'Motorola', '90:17:AC': 'Motorola', '94:76:F4': 'Motorola',
+  '98:4B:4A': 'Motorola', '9C:97:1A': 'Motorola', 'A4:70:7E': 'Motorola',
+  'AC:5D:10': 'Motorola', 'B0:79:94': 'Motorola', 'B4:35:64': 'Motorola',
+  'B8:C1:11': 'Motorola', 'BC:30:7E': 'Motorola', 'C0:59:76': 'Motorola',
+  'C4:63:94': 'Motorola', 'C8:1E:E7': 'Motorola', 'CC:04:B4': 'Motorola',
+  'D0:07:CA': 'Motorola', 'D4:50:3A': 'Motorola', 'D8:16:0A': 'Motorola',
+  'DC:02:8E': 'Motorola', 'E0:CB:C2': 'Motorola', 'E4:3E:E0': 'Motorola',
+  'E8:84:A5': 'Motorola', 'EC:5A:86': 'Motorola', 'F0:27:65': 'Motorola',
+  'F4:0F:24': 'Motorola', 'F8:CF:0D': 'Motorola', 'FC:19:10': 'Motorola',
+  // Google / Nest
+  '00:1A:11': 'Google', '18:D6:0D': 'Google', '3C:5A:B4': 'Google', '54:60:09': 'Google',
+  '64:9E:F4': 'Google', '74:DE:2B': 'Google', 'A4:77:33': 'Google', 'D4:F5:13': 'Google',
+  'F4:F5:E8': 'Google',
+  // LG
+  '00:1E:75': 'LG', '00:1F:E3': 'LG', '00:26:E2': 'LG', '04:7B:CB': 'LG',
+  '10:68:92': 'LG', '14:56:8E': 'LG', '18:3D:A2': 'LG', '1C:56:FE': 'LG',
+  'BC:30:D9': 'LG',
+  '24:26:42': 'LG', '2C:54:CF': 'LG', '38:BC:01': 'LG', '3C:52:82': 'LG',
+  '48:59:A2': 'LG', '50:BC:96': 'LG', '58:35:59': 'LG', '5C:17:D3': 'LG',
+  '64:89:08': 'LG', '6C:C7:EC': 'LG', '74:A5:28': 'LG', '78:5E:E8': 'LG',
+  '80:86:F2': 'LG', '88:C9:E8': 'LG', '8C:7A:28': 'LG', '90:18:7C': 'LG',
+  '94:44:44': 'LG', '9C:E6:35': 'LG', 'A0:39:EE': 'LG', 'A4:71:74': 'LG',
+  'A8:16:D0': 'LG', 'AC:E2:15': 'LG', 'B0:7E:5C': 'LG', 'B4:CE:40': 'LG',
+  'BC:4C:93': 'LG', 'C0:49:EF': 'LG', 'C4:9E:41': 'LG', 'C8:1E:E7': 'LG',
+  'CC:FA:00': 'LG', 'D4:38:AF': 'LG', 'D8:5D:E2': 'LG', 'DC:2B:2A': 'LG',
+  'E0:98:61': 'LG', 'E4:7C:D7': 'LG', 'E8:5B:5B': 'LG', 'EC:5C:84': 'LG',
+  'F0:1F:AF': 'LG', 'F4:6A:DD': 'LG', 'F8:E0:79': 'LG', 'FC:35:35': 'LG',
+  // Sony
+  '00:01:4A': 'Sony', '00:0A:30': 'Sony', '00:0E:07': 'Sony', '00:13:A9': 'Sony',
+  '00:15:C1': 'Sony', '00:19:C5': 'Sony', '00:1D:0D': 'Sony', '00:1E:3C': 'Sony',
+  '00:1F:E4': 'Sony', '00:21:5E': 'Sony', '00:24:BE': 'Sony', '00:26:BD': 'Sony',
+  '00:80:A0': 'Sony', '04:4B:F3': 'Sony', '08:00:46': 'Sony', '0C:48:C6': 'Sony',
+  '10:4F:A8': 'Sony', '10:95:E8': 'Sony', '14:5A:05': 'Sony', '18:22:EF': 'Sony',
+  '1C:A6:2C': 'Sony', '20:5E:F7': 'Sony', '24:BE:18': 'Sony', '28:EF:01': 'Sony',
+  '2C:54:CF': 'Sony', '30:96:FB': 'Sony', '38:59:F9': 'Sony', '3C:07:71': 'Sony',
+  '40:2B:A1': 'Sony', '44:5C:E9': 'Sony', '48:50:47': 'Sony', '4C:3B:FF': 'Sony',
+  '50:01:BB': 'Sony', '54:42:49': 'Sony', '58:17:0C': 'Sony', '5C:96:9D': 'Sony',
+  '60:38:E0': 'Sony', '64:77:91': 'Sony', '68:27:37': 'Sony', '6C:0E:0D': 'Sony',
+  '70:F0:87': 'Sony', '74:03:BD': 'Sony', '78:84:3C': 'Sony', '7C:61:66': 'Sony',
+  '80:EA:96': 'Sony', '84:BE:9D': 'Sony', '88:19:C2': 'Sony', '8C:25:05': 'Sony',
+  '90:C1:15': 'Sony', '94:27:90': 'Sony', '98:9C:57': 'Sony', '9C:14:63': 'Sony',
+  'A0:02:DC': 'Sony', 'A4:DA:3F': 'Sony', 'A8:E3:EE': 'Sony', 'AC:9B:0A': 'Sony',
+  'B0:55:08': 'Sony', 'B4:52:7D': 'Sony', 'B8:97:5A': 'Sony', 'BC:6E:E2': 'Sony',
+  'C0:49:EF': 'Sony', 'C4:21:E4': 'Sony', 'C8:14:79': 'Sony', 'CC:5D:4E': 'Sony',
+  'D0:27:88': 'Sony', 'D4:E8:B2': 'Sony', 'D8:9C:67': 'Sony', 'DC:03:98': 'Sony',
+  'E0:5A:9F': 'Sony', 'E4:18:6F': 'Sony', 'E8:6E:44': 'Sony', 'EC:9B:F3': 'Sony',
+  'F0:BF:97': 'Sony', 'F4:6D:2F': 'Sony', 'F8:E0:79': 'Sony', 'FC:F1:52': 'Sony',
+  // Amazon / Echo / Fire TV
+  '00:BB:3A': 'Amazon', '0C:47:C9': 'Amazon', '18:74:2E': 'Amazon', '1C:12:9E': 'Amazon',
+  '24:4C:07': 'Amazon', '28:EF:01': 'Amazon', '2C:11:65': 'Amazon', '2C:F0:5D': 'Amazon',
+  '34:D2:70': 'Amazon', '38:F7:3D': 'Amazon', '3C:5C:04': 'Amazon', '40:9F:38': 'Amazon',
+  '44:65:0D': 'Amazon', '48:E7:DA': 'Amazon', '50:DC:e7': 'Amazon', '54:EF:44': 'Amazon',
+  '58:48:22': 'Amazon', '5C:41:5F': 'Amazon', '60:45:BD': 'Amazon', '64:DB:A7': 'Amazon',
+  '68:37:E9': 'Amazon', '68:54:FD': 'Amazon', '68:9E:2E': 'Amazon', '6C:5E:3B': 'Amazon',
+  '74:C2:46': 'Amazon', '78:E1:03': 'Amazon', '7C:61:66': 'Amazon', '80:7A:7F': 'Amazon',
+  '84:71:27': 'Amazon', '88:71:E5': 'Amazon', '8C:84:01': 'Amazon', '90:45:27': 'Amazon',
+  '94:6A:B8': 'Amazon', '98:06:3C': 'Amazon', '9C:50:EE': 'Amazon', 'A0:02:DC': 'Amazon',
+  'A4:39:26': 'Amazon', 'A8:E3:EE': 'Amazon', 'AC:63:BE': 'Amazon', 'B0:FC:0D': 'Amazon',
+  'B4:E7:AD': 'Amazon', 'B8:5C:DA': 'Amazon', 'BC:0F:2B': 'Amazon', 'C0:28:45': 'Amazon',
+  'C4:03:A8': 'Amazon', 'C8:2E:18': 'Amazon', 'CC:69:FA': 'Amazon', 'D0:50:99': 'Amazon',
+  'D4:6D:6D': 'Amazon', 'D8:28:C9': 'Amazon', 'DC:74:A8': 'Amazon', 'E0:47:36': 'Amazon',
+  'E4:71:2C': 'Amazon', 'E8:DE:27': 'Amazon', 'EC:65:CC': 'Amazon', 'F0:81:73': 'Amazon',
+  'F4:03:43': 'Amazon', 'F4:65:A6': 'Amazon', 'F8:4F:AD': 'Amazon', 'FC:A6:67': 'Amazon',
+  // Nokia / HMD Global
+  '00:14:A7': 'Nokia', '00:19:B7': 'Nokia', '00:1C:9A': 'Nokia', '00:1F:5E': 'Nokia',
+  '00:1F:DF': 'Nokia', '00:21:08': 'Nokia', '00:22:FA': 'Nokia', '00:24:03': 'Nokia',
+  '00:25:5E': 'Nokia', '00:26:CC': 'Nokia', '00:28:7E': 'Nokia', '00:2A:10': 'Nokia',
+  '00:E0:FC': 'Nokia', '08:5B:0E': 'Nokia', '0C:48:C6': 'Nokia', '10:68:92': 'Nokia',
+  '14:4F:8A': 'Nokia', '18:3D:A2': 'Nokia', '1C:56:FE': 'Nokia', '24:26:42': 'Nokia',
+  '2C:54:CF': 'Nokia', '34:CE:00': 'Nokia', '38:AF:29': 'Nokia', '3C:52:82': 'Nokia',
+  '40:31:3C': 'Nokia', '48:59:A2': 'Nokia', '50:BC:96': 'Nokia', '58:35:59': 'Nokia',
+  '5C:17:D3': 'Nokia', '64:89:08': 'Nokia', '6C:C7:EC': 'Nokia', '74:A5:28': 'Nokia',
+  '78:5E:E8': 'Nokia', '80:86:F2': 'Nokia', '88:C9:E8': 'Nokia', '8C:7A:28': 'Nokia',
+  '90:18:7C': 'Nokia', '94:44:44': 'Nokia', '9C:E6:35': 'Nokia', 'A0:39:EE': 'Nokia',
+  'A4:71:74': 'Nokia', 'A8:16:D0': 'Nokia', 'AC:E2:15': 'Nokia', 'B0:7E:5C': 'Nokia',
+  'B4:CE:40': 'Nokia', 'BC:4C:93': 'Nokia', 'C0:49:EF': 'Nokia', 'C4:9E:41': 'Nokia',
+  'C8:1E:E7': 'Nokia', 'CC:FA:00': 'Nokia', 'D4:38:AF': 'Nokia', 'D8:5D:E2': 'Nokia',
+  'DC:2B:2A': 'Nokia', 'E0:98:61': 'Nokia', 'E4:7C:D7': 'Nokia', 'E8:5B:5B': 'Nokia',
+  'EC:5C:84': 'Nokia', 'F0:1F:AF': 'Nokia', 'F4:6A:DD': 'Nokia', 'F8:E0:79': 'Nokia',
+  'FC:35:35': 'Nokia',
+  // Vivo / iQOO
+  '00:36:76': 'Vivo', '00:BB:3A': 'Vivo', '14:E7:80': 'Vivo', '18:3D:A2': 'Vivo',
+  '1C:68:29': 'Vivo', '20:0B:C7': 'Vivo', '24:69:A5': 'Vivo', '28:3B:82': 'Vivo',
+  '2C:AB:00': 'Vivo', '30:87:30': 'Vivo', '34:6B:D3': 'Vivo', '38:F2:3E': 'Vivo',
+  '3C:FA:43': 'Vivo', '48:01:C5': 'Vivo', '54:89:98': 'Vivo', '58:25:68': 'Vivo',
+  '5C:4C:A9': 'Vivo', '5C:B3:96': 'Vivo', '60:E7:01': 'Vivo', '64:A6:51': 'Vivo',
+  '70:A8:E3': 'Vivo', '78:F5:E5': 'Vivo', '80:38:FD': 'Vivo', '84:A8:E4': 'Vivo',
+  '90:4E:91': 'Vivo', '9C:28:EF': 'Vivo', 'A4:81:7A': 'Vivo', 'AC:85:F3': 'Vivo',
+  'B4:30:52': 'Vivo', 'BC:3F:8F': 'Vivo', 'C8:1E:E7': 'Vivo', 'CC:05:0F': 'Vivo',
+  'CC:96:A0': 'Vivo', 'D0:16:7A': 'Vivo', 'D4:6A:A8': 'Vivo', 'D4:6D:6D': 'Vivo',
+  'D4:94:E8': 'Vivo', 'D8:06:2A': 'Vivo', 'E0:24:7F': 'Vivo', 'E4:35:C8': 'Vivo',
+  'E8:08:8B': 'Vivo', 'F0:99:BF': 'Vivo', 'F4:CB:5E': 'Vivo',
+  // Roku
+  'AC:3A:7A': 'Roku', 'AC:AE:19': 'Roku', 'B0:A7:37': 'Roku', 'C8:3A:6B': 'Roku',
+  'D0:4D:FC': 'Roku', 'D4:EA:0E': 'Roku', 'D8:2A:7E': 'Roku', 'DC:3A:5E': 'Roku',
+  'E0:26:36': 'Roku', 'E4:2C:D8': 'Roku', 'E8:31:CD': 'Roku', 'EC:6C:9A': 'Roku',
+  'F0:3E:1F': 'Roku', 'F4:09:D8': 'Roku', 'F8:A9:7A': 'Roku', 'FC:0F:E6': 'Roku',
+  // Sonos
+  '00:0E:58': 'Sonos', '34:42:62': 'Sonos', '48:A6:B8': 'Sonos', '54:2A:A2': 'Sonos',
+  '5C:AA:FD': 'Sonos', '78:28:CA': 'Sonos', '94:9F:3E': 'Sonos', '9C:8E:CD': 'Sonos',
+  'B8:E9:37': 'Sonos', 'BC:30:7B': 'Sonos', 'C0:28:45': 'Sonos', 'D8:1D:72': 'Sonos',
+  'E8:91:20': 'Sonos',
+  // Chromecast / Google Cast
+  '00:1A:11': 'Chromecast', '18:D6:0D': 'Chromecast', '3C:5A:B4': 'Chromecast',
+  '54:60:09': 'Chromecast', '64:9E:F4': 'Chromecast', '74:DE:2B': 'Chromecast',
+  'A4:77:33': 'Chromecast', 'D4:F5:13': 'Chromecast', 'F4:F5:E8': 'Chromecast',
+  // Philips Hue
+  '00:17:88': 'Philips Hue', '00:1B:ED': 'Philips Hue', '00:21:2E': 'Philips Hue',
+  '00:23:97': 'Philips Hue', '00:25:E4': 'Philips Hue', '00:27:13': 'Philips Hue',
+  '00:29:6F': 'Philips Hue', '00:2A:A8': 'Philips Hue', '00:2C:15': 'Philips Hue',
+  '00:2E:9C': 'Philips Hue', '00:30:F1': 'Philips Hue', '00:33:97': 'Philips Hue',
+  '00:35:E0': 'Philips Hue', '00:38:5E': 'Philips Hue', '00:3A:7D': 'Philips Hue',
+  '00:3C:10': 'Philips Hue', '00:3D:E1': 'Philips Hue', '00:3F:BD': 'Philips Hue',
+  '00:41:BC': 'Philips Hue', '00:43:94': 'Philips Hue', '00:45:58': 'Philips Hue',
+  '00:47:20': 'Philips Hue', '00:49:06': 'Philips Hue', '00:4A:8B': 'Philips Hue',
+  '00:4C:3B': 'Philips Hue', '00:4E:35': 'Philips Hue', '00:50:C7': 'Philips Hue',
+  '00:52:E6': 'Philips Hue', '00:54:AF': 'Philips Hue', '00:56:FE': 'Philips Hue',
+  '00:58:90': 'Philips Hue', '00:5A:39': 'Philips Hue', '00:5C:E2': 'Philips Hue',
+  '00:5E:3A': 'Philips Hue', '00:60:6D': 'Philips Hue', '00:62:EC': 'Philips Hue',
+  '00:64:40': 'Philips Hue', '00:66:4B': 'Philips Hue', '00:68:EB': 'Philips Hue',
+  '00:6B:9E': 'Philips Hue', '00:6D:52': 'Philips Hue', '00:6F:4E': 'Philips Hue',
+  '00:71:C1': 'Philips Hue', '00:74:12': 'Philips Hue', '00:75:E2': 'Philips Hue',
+  '00:77:49': 'Philips Hue', '00:79:18': 'Philips Hue', '00:7B:CB': 'Philips Hue',
+  '00:7D:E7': 'Philips Hue', '00:80:A3': 'Philips Hue', '00:82:6D': 'Philips Hue',
+  '00:84:41': 'Philips Hue', '00:86:50': 'Philips Hue', '00:88:15': 'Philips Hue',
+  '00:89:6C': 'Philips Hue', '00:8B:FB': 'Philips Hue', '00:8D:44': 'Philips Hue',
+  '00:8F:01': 'Philips Hue', '00:90:7A': 'Philips Hue', '00:92:9C': 'Philips Hue',
+  '00:94:E6': 'Philips Hue', '00:96:E6': 'Philips Hue', '00:98:77': 'Philips Hue',
+  '00:9A:49': 'Philips Hue', '00:9C:8E': 'Philips Hue', '00:9E:2F': 'Philips Hue',
+  '00:A0:6D': 'Philips Hue', '00:A1:E5': 'Philips Hue', '00:A3:14': 'Philips Hue',
+  '00:A4:C2': 'Philips Hue', '00:A6:4F': 'Philips Hue', '00:A7:8C': 'Philips Hue',
+  '00:A8:5D': 'Philips Hue', '00:AA:DA': 'Philips Hue', '00:AC:52': 'Philips Hue',
+  '00:AD:63': 'Philips Hue', '00:AF:58': 'Philips Hue', '00:B0:52': 'Philips Hue',
+  '00:B1:D5': 'Philips Hue', '00:B3:19': 'Philips Hue', '00:B4:F2': 'Philips Hue',
+  '00:B6:1B': 'Philips Hue', '00:B8:7D': 'Philips Hue', '00:BA:B2': 'Philips Hue',
+  '00:BC:9F': 'Philips Hue', '00:BE:61': 'Philips Hue', '00:C0:14': 'Philips Hue',
+  '00:C2:C6': 'Philips Hue', '00:C4:64': 'Philips Hue', '00:C6:10': 'Philips Hue',
+  '00:C8:74': 'Philips Hue', '00:CA:40': 'Philips Hue', '00:CC:5A': 'Philips Hue',
+  '00:CE:4D': 'Philips Hue', '00:D0:CA': 'Philips Hue', '00:D2:1E': 'Philips Hue',
+  '00:D4:3B': 'Philips Hue', '00:D6:1B': 'Philips Hue', '00:D8:A1': 'Philips Hue',
+  '00:DA:00': 'Philips Hue', '00:DC:E8': 'Philips Hue', '00:DE:58': 'Philips Hue',
+  '00:E0:3B': 'Philips Hue', '00:E2:1D': 'Philips Hue', '00:E4:01': 'Philips Hue',
+  '00:E6:2E': 'Philips Hue', '00:E8:75': 'Philips Hue', '00:EA:00': 'Philips Hue',
+  '00:EC:30': 'Philips Hue', '00:EE:BD': 'Philips Hue', '00:F0:1E': 'Philips Hue',
+  '00:F2:14': 'Philips Hue', '00:F4:0A': 'Philips Hue', '00:F6:20': 'Philips Hue',
+  '00:F8:21': 'Philips Hue', '00:FA:22': 'Philips Hue', '00:FC:44': 'Philips Hue',
+  '00:FE:20': 'Philips Hue', '14:23:D7': 'Philips Hue', '18:17:34': 'Philips Hue',
+  '1C:43:19': 'Philips Hue', '20:13:E0': 'Philips Hue', '24:62:AB': 'Philips Hue',
+  '28:AD:3A': 'Philips Hue', '2C:3F:3F': 'Philips Hue', '30:52:CB': 'Philips Hue',
+  '34:31:C4': 'Philips Hue', '38:17:66': 'Philips Hue', '3C:71:BF': 'Philips Hue',
+  '40:12:E4': 'Philips Hue', '44:4E:2A': 'Philips Hue', '48:43:FC': 'Philips Hue',
+  '4C:30:89': 'Philips Hue', '50:32:75': 'Philips Hue', '54:52:1A': 'Philips Hue',
+  '58:8C:08': 'Philips Hue', '5C:AD:CF': 'Philips Hue', '60:27:5C': 'Philips Hue',
+  '64:1C:AE': 'Philips Hue', '68:14:01': 'Philips Hue', '6C:72:20': 'Philips Hue',
+  '70:12:F4': 'Philips Hue', '74:03:BD': 'Philips Hue', '78:28:CA': 'Philips Hue',
+  '7C:1C:4E': 'Philips Hue', '80:7A:7F': 'Philips Hue', '84:17:15': 'Philips Hue',
+  '88:15:44': 'Philips Hue', '8C:85:80': 'Philips Hue', '90:14:DA': 'Philips Hue',
+  '94:8B:C1': 'Philips Hue', '98:E7:43': 'Philips Hue', '9C:32:96': 'Philips Hue',
+  'A0:1E:0B': 'Philips Hue', 'A4:3E:51': 'Philips Hue', 'A8:60:B6': 'Philips Hue',
+  'AC:4B:C8': 'Philips Hue', 'B0:AD:6B': 'Philips Hue', 'B4:35:22': 'Philips Hue',
+  'B8:27:EB': 'Philips Hue', 'BC:93:07': 'Philips Hue', 'C0:3F:0E': 'Philips Hue',
+  'C4:45:67': 'Philips Hue', 'C8:14:79': 'Philips Hue', 'CC:20:E8': 'Philips Hue',
+  'D0:22:BE': 'Philips Hue', 'D4:22:3F': 'Philips Hue', 'D8:30:62': 'Philips Hue',
+  'DC:4F:22': 'Philips Hue', 'E0:14:9F': 'Philips Hue', 'E4:11:5B': 'Philips Hue',
+  'E8:06:88': 'Philips Hue', 'EC:B5:FC': 'Philips Hue', 'F0:1F:AF': 'Philips Hue',
+  'F4:4C:7F': 'Philips Hue', 'F8:97:68': 'Philips Hue', 'FC:45:96': 'Philips Hue',
+  // Microsoft Surface / Xbox
+  '28:18:78': 'Microsoft', '30:59:26': 'Microsoft', '40:E2:30': 'Microsoft',
+  '50:1A:C5': 'Microsoft', '60:45:BD': 'Microsoft', '7C:61:66': 'Microsoft',
+  '90:E4:68': 'Microsoft', '98:5F:D3': 'Microsoft', 'B0:65:F2': 'Microsoft',
+  'C8:3B:45': 'Microsoft', 'D4:63:C6': 'Microsoft', 'E4:98:D1': 'Microsoft',
+  'F8:59:71': 'Microsoft',
 };
 
 function lookupOUI(mac) {
@@ -298,13 +603,359 @@ function lookupOUI(mac) {
   return OUI_DB[oui] || 'Desconocido';
 }
 
+async function discoverUPnP() {
+  return new Promise((resolve) => {
+    const devices = {};
+    const socket = dgram.createSocket('udp4');
+    const searchMsg = Buffer.from([
+      'M-SEARCH * HTTP/1.1',
+      'HOST: 239.255.255.250:1900',
+      'MAN: "ssdp:discover"',
+      'MX: 2',
+      'ST: ssdp:all',
+      'USER-AGENT: Node.js/18 UPnP/1.1 WiFiAnalyzer/1.0',
+      '',
+    ].join('\r\n'));
+
+    socket.on('message', (msg, rinfo) => {
+      const text = msg.toString();
+      const ip = rinfo.address;
+      if (ip === '127.0.0.1' || ip.startsWith('127.')) return;
+      const locationMatch = text.match(/LOCATION:\s*(.+)/i);
+      const serverMatch = text.match(/SERVER:\s*(.+)/i);
+      const usnMatch = text.match(/USN:\s*(.+)/i);
+      const stMatch = text.match(/ST:\s*(.+)/i);
+      if (!devices[ip]) devices[ip] = [];
+      devices[ip].push({
+        location: locationMatch ? locationMatch[1].trim() : null,
+        server: serverMatch ? serverMatch[1].trim() : null,
+        usn: usnMatch ? usnMatch[1].trim() : null,
+        st: stMatch ? stMatch[1].trim() : null,
+      });
+    });
+
+    socket.on('listening', () => {
+      try { socket.addMembership('239.255.255.250'); } catch (_) {}
+      socket.send(searchMsg, 0, searchMsg.length, 1900, '239.255.255.250');
+      setTimeout(() => {
+        try { socket.dropMembership('239.255.255.250'); } catch (_) {}
+        socket.close();
+        resolve(devices);
+      }, 3500);
+    });
+
+    socket.bind(1900, () => {
+      // A veces bind tarda; fallback
+      setTimeout(() => {
+        if (socket.pending !== false) {
+          try { socket.send(searchMsg, 0, searchMsg.length, 1900, '239.255.255.250'); } catch (_) {}
+        }
+      }, 100);
+    });
+  });
+}
+
+async function getUPnPFriendlyName(locationUrl) {
+  if (!locationUrl) return null;
+  const proto = locationUrl.startsWith('https') ? https : http;
+  return new Promise((resolve) => {
+    const req = proto.get(locationUrl, { timeout: 3000, rejectUnauthorized: false }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { data += chunk; if (data.length > 100000) { req.destroy(); resolve(null); } });
+      res.on('end', () => {
+        const fm = data.match(/<friendlyName>(.+?)<\/friendlyName>/is);
+        if (fm) {
+          const name = fm[1].replace(/[\r\n\s]+/g, ' ').trim();
+          if (name.length > 1 && name.length < 80) return resolve(name);
+        }
+        const dm = data.match(/<modelName>(.+?)<\/modelName>/is);
+        if (dm) {
+          const name = dm[1].replace(/[\r\n\s]+/g, ' ').trim();
+          if (name.length > 1 && name.length < 80) return resolve(name);
+        }
+        resolve(null);
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.setTimeout(3000);
+  });
+}
+
+async function discoverMDNS() {
+  // Windows no tiene mDNS nativo, usamos PowerShell + Resolve-DnsName con .local
+  try {
+    const out = await run(`powershell -NoProfile -Command "
+      $ips = @('192.168.20.1'..'192.168.20.254')
+      $results = @()
+      foreach ($last in 1..254) {
+        $ip = '192.168.20.' + $last
+        try {
+          $name = (Resolve-DnsName $ip -Type PTR -ErrorAction SilentlyContinue).NameHost
+          if ($name) { $results += \"$ip|$name\" }
+        } catch {}
+      }
+      $results -join \"\`n\"
+    "`, 15000);
+    const map = {};
+    for (const line of out.split(/\r?\n/)) {
+      const [ip, name] = line.split('|');
+      if (ip && name && name.includes('.')) map[ip.trim()] = name.trim();
+    }
+    return map;
+  } catch (_) {
+    return {};
+  }
+}
+
+async function getHostname(ip, upnpDevices = {}) {
+  // Si ya tenemos UPnP descubierto con friendlyName, usarlo
+  if (upnpDevices[ip]) {
+    const upnp = upnpDevices[ip];
+    if (upnp.friendlyName && upnp.friendlyName !== 'Desconocido') return upnp.friendlyName;
+    // Intentar obtener friendlyName desde LOCATION
+    for (const entry of upnp.entries || []) {
+      if (entry.location) {
+        const name = await withTimeout(getUPnPFriendlyName(entry.location), 3000);
+        if (name) return name;
+      }
+    }
+  }
+
+  // Probar varios metodos de descubrimiento de nombre en paralelo
+  const metodos = [
+    withTimeout(getDNS(ip), 3000),
+    withTimeout(getLLMNR(ip), 3000),
+    withTimeout(getNetBIOS(ip), 3000),
+    withTimeout(getHTTPName(ip, false), 3000),
+    withTimeout(getHTTPName(ip, true), 3000),
+    withTimeout(getSNMPName(ip), 3000),
+  ];
+
+  const resultados = await Promise.all(metodos);
+  for (const nombre of resultados) {
+    if (nombre && nombre !== 'Desconocido' && nombre.length > 1) {
+      return nombre.replace(/\r\n/g, ' ').replace(/\n/g, ' ').replace(/\r/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+  }
+  return 'Desconocido';
+}
+
+// TTL OS Fingerprinting - Extrae TTL del ping para identificar OS
+async function getTTLFromPing(ip) {
+  try {
+    const out = await run(`ping -n 1 -w 1000 ${ip}`, 3000);
+    const m = out.match(/TTL[=:](\d+)/i);
+    if (m) return parseInt(m[1]);
+  } catch (_) {}
+  return null;
+}
+
+function detectOSByTTL(ttl) {
+  if (!ttl) return null;
+  // TTL decrementa por cada hop (router) que pasa
+  // En red local (1 hop del router), TTL esperado:
+  if (ttl >= 60 && ttl <= 65) return { os: 'Linux / Android / iOS / MacOS', family: 'Unix-like' };
+  if (ttl >= 126 && ttl <= 129) return { os: 'Windows', family: 'Windows' };
+  if (ttl >= 250 && ttl <= 255) return { os: 'Router / Cisco / Solaris / AIX', family: 'Network' };
+  if (ttl >= 50 && ttl <= 59) return { os: 'Linux / Android (2+ hops)', family: 'Unix-like' };
+  if (ttl >= 116 && ttl <= 125) return { os: 'Windows (2+ hops)', family: 'Windows' };
+  return null;
+}
+
+// Detecta MACs localmente administrados (randomizados por privacidad de Android/iOS)
+function isLocalMAC(mac) {
+  if (!mac || mac === 'N/A') return false;
+  const firstByte = parseInt(mac.split(':')[0], 16);
+  return (firstByte & 0x02) !== 0; // bit 1 = localmente administrado
+}
+
+function inferirDispositivoCompleto(puertos, mac, ttl, hostname) {
+  const p = new Set(puertos);
+  const macU = mac.toUpperCase();
+  const oui = macU.slice(0, 8);
+  const osInfo = detectOSByTTL(ttl);
+  const h = (hostname || '').toLowerCase();
+
+  // Si hostname indica claramente un tipo de dispositivo, respetarlo
+  if (h.includes('tv') || h.includes('webos') || h.includes('bravia') || h.includes('roku') || h.includes('firetv') || h.includes('fire tv')) {
+    return { tipo: 'Smart TV LG', nombre: hostname };
+  }
+  if (h.includes('chromecast') || h.includes('google cast')) {
+    return { tipo: 'Chromecast', nombre: hostname };
+  }
+  if (h.includes('sonos')) {
+    return { tipo: 'Dispositivo Sonos', nombre: hostname };
+  }
+  if (h.includes('hue') || h.includes('philips')) {
+    return { tipo: 'Dispositivo Philips Hue', nombre: hostname };
+  }
+  if (h.includes('xbox')) {
+    return { tipo: 'Dispositivo Microsoft', nombre: hostname };
+  }
+  if (h.includes('playstation') || h.includes('ps4') || h.includes('ps5')) {
+    return { tipo: 'Dispositivo Sony', nombre: hostname };
+  }
+  if (h.includes('printer') || h.includes('impresora') || h.includes('hp ') || h.includes('canon')) {
+    return { tipo: 'Impresora', nombre: hostname };
+  }
+  if (h.includes('camera') || h.includes('camara') || h.includes('ipcam')) {
+    return { tipo: 'Cámara IP', nombre: hostname };
+  }
+  if (h.includes('nas') || h.includes('synology') || h.includes('qnap')) {
+    return { tipo: 'NAS / Servidor', nombre: hostname };
+  }
+
+  // iPhone / iPad
+  if (p.has(62078)) return { tipo: 'Movil/Tablet', nombre: 'iPhone / iPad (Apple)' };
+
+  // Android ADB
+  if (p.has(5555)) return { tipo: 'Movil/Tablet', nombre: 'Android (Modo Desarrollo)' };
+
+  // Router / Gateway
+  if (p.has(80) && p.has(5000)) return { tipo: 'Router / AP', nombre: 'Router UPnP' };
+  if (ttl && ttl >= 250) return { tipo: 'Router / AP', nombre: 'Router / Network Device' };
+
+  // Windows PC
+  if (p.has(445) || p.has(3389)) return { tipo: 'PC / Laptop', nombre: 'Windows PC' };
+  if (osInfo && osInfo.family === 'Windows') {
+    return { tipo: 'PC / Laptop', nombre: osInfo.os };
+  }
+
+  // NAS / Servidor
+  if (p.has(5000) || p.has(5001)) return { tipo: 'NAS / Servidor', nombre: 'Synology NAS' };
+  if (p.has(32400)) return { tipo: 'Media Server', nombre: 'Plex Media Server' };
+  if (p.has(8123)) return { tipo: 'Smart Home', nombre: 'Home Assistant' };
+
+  // Linux / Servidor
+  if (p.has(22)) return { tipo: 'Servidor / Linux', nombre: 'Servidor SSH' };
+
+  // Deteccion de moviles por MAC local + TTL Linux-like + sin puertos abiertos
+  if (isLocalMAC(mac) && (!puertos || puertos.length === 0)) {
+    if (osInfo && osInfo.family === 'Unix-like') {
+      return { tipo: 'Movil/Tablet', nombre: 'Celular/Tablet (Privacidad MAC activada)' };
+    }
+    return { tipo: 'Movil/Tablet', nombre: 'Dispositivo Movil (MAC randomizada)' };
+  }
+
+  // Deteccion por TTL Linux-like sin puertos (probablemente movil con firewall)
+  if (osInfo && osInfo.family === 'Unix-like' && (!puertos || puertos.length === 0)) {
+    return { tipo: 'Movil/Tablet', nombre: osInfo.os + ' (Firewall activo)' };
+  }
+
+  // Web
+  if (p.has(80) || p.has(443) || p.has(8080) || p.has(8443)) {
+    return { tipo: 'Dispositivo con Web', nombre: 'Dispositivo con Interfaz Web' };
+  }
+
+  return null;
+}
+
+function scanPort(ip, port, timeout = 1500) {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(timeout);
+    socket.on('connect', () => { socket.destroy(); resolve({ open: true, port }); });
+    socket.on('timeout', () => { socket.destroy(); resolve({ open: false, port }); });
+    socket.on('error', () => { socket.destroy(); resolve({ open: false, port }); });
+    socket.connect(port, ip);
+  });
+}
+
+async function scanPorts(ip) {
+  const commonPorts = [22, 23, 80, 443, 445, 3389, 5000, 5001, 5555, 62078, 8080, 8443, 32400, 8123];
+  const results = [];
+  for (const port of commonPorts) {
+    const res = await scanPort(ip, port, 1000);
+    if (res.open) results.push(port);
+  }
+  return results;
+}
+
+async function grabBanner(ip, port, timeout = 1500) {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let data = '';
+    socket.setTimeout(timeout);
+    socket.on('connect', () => {
+      if (port === 22) { /* SSH envia banner automatico */ }
+      else { socket.write('HEAD / HTTP/1.0\r\n\r\n'); }
+    });
+    socket.on('data', (chunk) => {
+      data += chunk.toString();
+      if (data.length > 512 || data.includes('\n')) { socket.destroy(); resolve(data.slice(0, 300)); }
+    });
+    socket.on('timeout', () => { socket.destroy(); resolve(data.slice(0, 300)); });
+    socket.on('error', () => { socket.destroy(); resolve(data.slice(0, 300)); });
+    socket.connect(port, ip);
+  });
+}
+
+function identificarPorPuertos(puertos, mac) {
+  const p = new Set(puertos);
+  const macU = mac.toUpperCase();
+  const oui = macU.slice(0, 8);
+
+  // iPhone / iPad
+  if (p.has(62078)) return { tipo: 'Movil/Tablet', nombre: 'iPhone / iPad (Apple)' };
+  if (oui.startsWith('AC:DE:48') || oui.startsWith('F0:18:98') || macU.startsWith('02:00:00')) {
+    if (p.has(80) || p.has(443)) return { tipo: 'Movil/Tablet', nombre: 'iPhone / iPad (Apple)' };
+  }
+
+  // Android ADB
+  if (p.has(5555)) return { tipo: 'Movil/Tablet', nombre: 'Android (Modo Desarrollo)' };
+
+  // Router / Gateway
+  if (p.has(80) && p.has(5000)) return { tipo: 'Router / AP', nombre: 'Router UPnP' };
+
+  // Windows PC
+  if (p.has(445) || p.has(3389)) return { tipo: 'PC / Laptop', nombre: 'Windows PC' };
+
+  // NAS / Servidor
+  if (p.has(5000) || p.has(5001)) return { tipo: 'NAS / Servidor', nombre: 'Synology NAS' };
+  if (p.has(32400)) return { tipo: 'Media Server', nombre: 'Plex Media Server' };
+  if (p.has(8123)) return { tipo: 'Smart Home', nombre: 'Home Assistant' };
+
+  // Linux / Servidor
+  if (p.has(22)) return { tipo: 'Servidor / Linux', nombre: 'Servidor SSH' };
+
+  // Web
+  if (p.has(80) || p.has(443) || p.has(8080) || p.has(8443)) {
+    return { tipo: 'Dispositivo con Web', nombre: 'Dispositivo con Interfaz Web' };
+  }
+
+  return null;
+}
+
 function detectarTipo(fabricante, ip, gatewayIp) {
   if (ip === gatewayIp) return 'Router / Gateway';
   const f = fabricante.toLowerCase();
   if (f.includes('apple')) return 'Dispositivo Apple';
   if (f.includes('samsung')) return 'Dispositivo Samsung';
+  if (f.includes('xiaomi') || f.includes('redmi')) return 'Dispositivo Xiaomi / Redmi';
+  if (f.includes('huawei') || f.includes('honor')) return 'Dispositivo Huawei / Honor';
+  if (f.includes('oppo')) return 'Dispositivo OPPO';
+  if (f.includes('vivo')) return 'Dispositivo Vivo';
+  if (f.includes('oneplus')) return 'Dispositivo OnePlus';
+  if (f.includes('realme')) return 'Dispositivo Realme';
+  if (f.includes('motorola') || f.includes('lenovo moto')) return 'Dispositivo Motorola';
+  if (f.includes('lg')) return 'Dispositivo LG';
+  if (f.includes('sony') || f.includes('ericsson')) return 'Dispositivo Sony';
+  if (f.includes('nokia') || f.includes('hmd')) return 'Dispositivo Nokia';
+  if (f.includes('google') || f.includes('nest')) return 'Dispositivo Google / Nest';
+  if (f.includes('amazon') || f.includes('alexa') || f.includes('echo')) return 'Dispositivo Amazon / Alexa';
   if (f.includes('vmware') || f.includes('hyper-v') || f.includes('virtualbox')) return 'Máquina Virtual';
   if (f.includes('tp-link') || f.includes('huawei') || f.includes('xiaomi') || f.includes('d-link') || f.includes('netgear') || f.includes('asus') || f.includes('linksys')) return 'Router / AP';
+  if (f.includes('philips') || f.includes('hue')) return 'Dispositivo Philips Hue';
+  if (f.includes('sonos')) return 'Dispositivo Sonos';
+  if (f.includes('chromecast') || f.includes('google cast')) return 'Chromecast';
+  if (f.includes('roku')) return 'Dispositivo Roku';
+  if (f.includes('fire tv') || f.includes('firetv')) return 'Amazon Fire TV';
+  if (f.includes('samsung') && f.includes('tv')) return 'Smart TV Samsung';
+  if (f.includes('lg') && f.includes('tv')) return 'Smart TV LG';
+  if (f.includes('tcl')) return 'Smart TV TCL';
+  if (f.includes('hisense')) return 'Smart TV Hisense';
   return 'Dispositivo Genérico';
 }
 
@@ -333,52 +984,122 @@ async function pingSweep(subnet, onProgress) {
 
 async function obtenerDispositivos(gatewayIp) {
   const subnet = gatewayIp.split('.').slice(0, 3).join('.');
-  console.log(`[Dispositivos] Haciendo ping sweep a ${subnet}.1 - ${subnet}.254...`);
 
+  // 1. Descubrir dispositivos UPnP en paralelo con ping sweep
+  console.log(`[Dispositivos] Escaneando UPnP/SSDP en paralelo...`);
+  const upnpPromise = discoverUPnP();
+
+  // 2. Ping sweep
+  console.log(`[Dispositivos] Haciendo ping sweep a ${subnet}.1 - ${subnet}.254...`);
   const activos = await pingSweep(subnet, (done, total) => {
     console.log(`[Dispositivos] Progreso: ${done}/${total} IPs`);
   });
   console.log(`[Dispositivos] ${activos.length} dispositivos respondieron al ping`);
 
-  // Esperar un poco para que Windows actualice la tabla ARP
-  await new Promise(r => setTimeout(r, 800));
+  // 3. Esperar resultados UPnP
+  const upnpRaw = await upnpPromise;
+  console.log(`[Dispositivos] UPnP descubrio ${Object.keys(upnpRaw).length} IPs`);
 
-  // Leer tabla ARP
+  // Normalizar datos UPnP por IP
+  const upnpDevices = {};
+  for (const [ip, entries] of Object.entries(upnpRaw)) {
+    upnpDevices[ip] = { entries, friendlyName: null };
+  }
+
+  // 4. Asegurar que gateway siempre esté en la lista
+  if (!activos.includes(gatewayIp)) activos.push(gatewayIp);
+
+  // 5. Agregar dispositivos UPnP que no respondieron al ping
+  for (const ip of Object.keys(upnpDevices)) {
+    if (!activos.includes(ip)) activos.push(ip);
+  }
+
+  // 6. Obtener hostname de cada IP (con UPnP como hint)
+  console.log(`[Dispositivos] Resolviendo nombres de ${activos.length} hosts...`);
+  const hostMap = {};
+  for (const ip of activos) {
+    hostMap[ip] = await getHostname(ip, upnpDevices);
+  }
+
+  // 7. Scan de puertos para identificar dispositivos
+  console.log(`[Dispositivos] Escaneando puertos de ${activos.length} hosts...`);
+  const portMap = {};
+  for (const ip of activos) {
+    portMap[ip] = await scanPorts(ip);
+    if (portMap[ip].length > 0) {
+      console.log(`[Dispositivos] ${ip} puertos abiertos: ${portMap[ip].join(', ')}`);
+    }
+  }
+
+  // 8. TTL OS Fingerprinting
+  console.log(`[Dispositivos] Obteniendo TTL de ${activos.length} hosts...`);
+  const ttlMap = {};
+  for (const ip of activos) {
+    ttlMap[ip] = await getTTLFromPing(ip);
+    if (ttlMap[ip]) {
+      const osGuess = detectOSByTTL(ttlMap[ip]);
+      console.log(`[Dispositivos] ${ip} TTL=${ttlMap[ip]} -> ${osGuess ? osGuess.os : 'Desconocido'}`);
+    }
+  }
+
+  // 9. Forzar ARP resolution
+  console.log(`[Dispositivos] Forzando ARP para ${activos.length} hosts...`);
+  for (const ip of activos) {
+    try { await run(`ping -n 1 -w 300 ${ip}`); } catch (_) {}
+  }
+  await new Promise(r => setTimeout(r, 1200));
+
+  // 10. Leer tabla ARP
   const arpOut = await run('arp -a');
-  const dispositivos = [];
-  const vistos = new Set();
-
+  const arpMap = {};
   for (const line of arpOut.split(/\r?\n/)) {
     const m = line.trim().match(/(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2})/i);
     if (!m) continue;
     const ip = m[1];
     const mac = m[2].replace(/-/g, ':').toUpperCase();
-    if (vistos.has(ip)) continue;
-
-    // Filtrar multicast, broadcast, localhost
     const firstOctet = parseInt(ip.split('.')[0]);
     if (firstOctet >= 224 && firstOctet <= 239) continue;
     if (ip === '255.255.255.255' || ip.startsWith('127.')) continue;
-
-    // Solo incluir IPs que respondieron al ping (salvo gateway que siempre va)
-    const esGateway = ip === gatewayIp;
-    if (!esGateway && !activos.includes(ip)) continue;
-
-    vistos.add(ip);
-    const fabricante = lookupOUI(mac);
-    const tipo = detectarTipo(fabricante, ip, gatewayIp);
-    dispositivos.push({ ip, mac, fabricante, tipo, estado: 'Activo' });
+    if (!arpMap[ip]) arpMap[ip] = mac;
   }
 
-  // Agregar gateway si no aparece en ARP
-  const tieneGateway = dispositivos.some(d => d.ip === gatewayIp);
-  if (!tieneGateway && gatewayIp) {
-    dispositivos.unshift({
-      ip: gatewayIp,
-      mac: 'N/A',
-      fabricante: 'Desconocido',
-      tipo: 'Router / Gateway',
-      estado: 'Activo'
+  // 11. Construir lista final
+  const dispositivos = [];
+  for (const ip of activos) {
+    let mac = arpMap[ip];
+    if (!mac) {
+      try {
+        const specific = await run(`arp -a ${ip}`);
+        const m2 = specific.match(/([0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2})/i);
+        if (m2) mac = m2[1].replace(/-/g, ':').toUpperCase();
+      } catch (_) {}
+    }
+    if (!mac) mac = 'N/A';
+    const fabricante = mac !== 'N/A' ? lookupOUI(mac) : 'Desconocido';
+    let tipo = detectarTipo(fabricante, ip, gatewayIp);
+    let hostname = hostMap[ip] || 'Desconocido';
+    // Limpiar cualquier salto de linea residual
+    hostname = hostname.replace(/\r\n/g, ' ').replace(/\n/g, ' ').replace(/\r/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // Intentar identificar por puertos + TTL + MAC + hostname
+    const puertos = portMap[ip] || [];
+    const ttl = ttlMap[ip];
+    const inferido = inferirDispositivoCompleto(puertos, mac, ttl, hostname);
+    if (inferido) {
+      if (hostname === 'Desconocido') hostname = inferido.nombre;
+      // Reemplazar tipo si es generico o menos especifico que la inferencia
+      const genericos = ['Dispositivo Genérico', 'Dispositivo LG', 'Dispositivo Sony', 'Dispositivo Samsung', 'Dispositivo Apple', 'Dispositivo Xiaomi / Redmi', 'Dispositivo Huawei / Honor', 'Dispositivo OPPO', 'Dispositivo Vivo', 'Dispositivo OnePlus', 'Dispositivo Realme', 'Dispositivo Motorola', 'Dispositivo Nokia', 'Dispositivo Google / Nest', 'Dispositivo Amazon / Alexa', 'Dispositivo Microsoft'];
+      if (genericos.includes(tipo)) tipo = inferido.tipo;
+    }
+
+    dispositivos.push({
+      ip,
+      mac,
+      fabricante,
+      tipo,
+      estado: 'Activo',
+      hostname,
+      puertos
     });
   }
 

@@ -3,6 +3,14 @@ const fs = require('fs');
 const path = require('path');
 const { obtenerDatos, obtenerDispositivos } = require('./escaneo');
 
+// Manejo de errores no capturados para evitar crash del servidor
+process.on('uncaughtException', (err) => {
+  console.error('[ERROR NO CAPTURADO]', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[PROMESA RECHAZADA]', reason);
+});
+
 let PORT = 3001;
 
 const MIME = {
