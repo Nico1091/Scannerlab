@@ -1,7 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { obtenerDatos, obtenerDispositivos } = require('./escaneo');
+const { obtenerDatos, obtenerDispositivos, obtenerInfoDetalladaDispositivo, lookupOUI } = require('./escaneo');
 
 // Manejo de errores no capturados para evitar crash del servidor
 process.on('uncaughtException', (err) => {
@@ -12,6 +12,9 @@ process.on('unhandledRejection', (reason) => {
 });
 
 let PORT = 3001;
+
+// Cache del ultimo escaneo de dispositivos (para pasar MAC al endpoint de detalle)
+let lastDeviceCache = {};
 
 const MIME = {
   '.html': 'text/html',
@@ -53,8 +56,33 @@ function startServer(port) {
         const datos = await obtenerDatos();
         const gateway = datos.ip.gateway;
         const dispositivos = await obtenerDispositivos(gateway);
+        // Guardar MACs en cache para el endpoint de detalle
+        lastDeviceCache = {};
+        for (const d of dispositivos) {
+          if (d.mac && d.mac !== 'N/A') lastDeviceCache[d.ip] = d.mac;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, data: dispositivos, gateway }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
+    // Endpoint: info detallada de un dispositivo especifico
+    const deviceMatch = req.url.match(/^\/api\/device\/(.+)$/);
+    if (deviceMatch) {
+      const targetIp = decodeURIComponent(deviceMatch[1]);
+      try {
+        const info = await obtenerInfoDetalladaDispositivo(targetIp);
+        // Usar MAC del cache del escaneo principal si no se detecto
+        if ((!info.mac || info.mac === 'N/A') && lastDeviceCache[targetIp]) {
+          info.mac = lastDeviceCache[targetIp];
+          info.fabricante = lookupOUI ? lookupOUI(info.mac) : 'Desconocido';
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, data: info }));
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: err.message }));
@@ -95,7 +123,7 @@ function startServer(port) {
 
   srv.listen(port, '0.0.0.0', () => {
     console.log(`\n========================================`);
-    console.log(`  WiFi Analyzer AI - Servidor Online`);
+    console.log(`  NetPulse AI - Servidor Online`);
     console.log(`========================================`);
     console.log(`  Abre tu navegador en:`);
     console.log(`  http://localhost:${port}`);

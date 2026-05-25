@@ -102,6 +102,7 @@ async function obtenerDatos() {
   const ipv4 = (await run('powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias Wi-Fi).IPAddress"')).trim();
   const mask = (await run('powershell -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias Wi-Fi).PrefixLength"')).trim();
   const gw   = (await run('powershell -NoProfile -Command "(Get-NetRoute -DestinationPrefix 0.0.0.0/0 -InterfaceAlias Wi-Fi).NextHop"')).trim();
+  const dns  = (await run('powershell -NoProfile -Command "(Get-DnsClientServerAddress -AddressFamily IPv4).ServerAddresses | Select-Object -Unique"')).trim().split(/\r?\n/).filter(x => x.trim());
 
   const isLocal = ipv4 && (
     ipv4.startsWith('192.168.') ||
@@ -126,6 +127,7 @@ async function obtenerDatos() {
       direccion: ipv4 || 'N/A',
       mascara: mask || 'N/A',
       gateway: gw || 'N/A',
+      dns: dns.length ? dns : ['Desconocido'],
       esRedLocal: isLocal ? 'Si' : 'No / Publica',
     }
   };
@@ -852,6 +854,208 @@ function inferirDispositivoCompleto(puertos, mac, ttl, hostname) {
   return null;
 }
 
+// Cache para resultados de LM Studio (evita re-consultar mismos dispositivos)
+const lmCache = new Map();
+
+// Base de datos local de dispositivos identificados (aprendizaje)
+const DEVICE_DB_PATH = path.join(__dirname, 'dispositivos_db.json');
+function loadDeviceDB() {
+  try {
+    if (fs.existsSync(DEVICE_DB_PATH)) {
+      const data = JSON.parse(fs.readFileSync(DEVICE_DB_PATH, 'utf-8'));
+      return new Map(Object.entries(data));
+    }
+  } catch (e) {}
+  return new Map();
+}
+function saveDeviceDB(db) {
+  try {
+    const obj = Object.fromEntries(db);
+    fs.writeFileSync(DEVICE_DB_PATH, JSON.stringify(obj, null, 2));
+  } catch (e) {}
+}
+const deviceDB = loadDeviceDB();
+
+// Buscar informacion de MAC address online via macvendors.com
+async function lookupMACOnline(mac) {
+  if (!mac || mac === 'N/A') return null;
+  const oui = mac.replace(/:/g, '').substring(0, 6).toUpperCase();
+  return new Promise((resolve) => {
+    const req = https.get(`https://api.macvendors.com/${mac}`, { timeout: 4000 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        const clean = data.trim();
+        if (clean && !clean.includes('error') && !clean.includes('Not Found')) {
+          console.log(`[Web] MAC lookup ${mac} -> ${clean}`);
+          resolve(clean);
+        } else {
+          resolve(null);
+        }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+// Buscar en DuckDuckGo para obtener informacion de dispositivos
+async function searchWeb(query) {
+  return new Promise((resolve) => {
+    const encoded = encodeURIComponent(query);
+    const req = https.get(`https://html.duckduckgo.com/html/?q=${encoded}`, { timeout: 6000 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          // Extraer snippets de resultados
+          const snippets = [];
+          const matches = data.match(/class="result__snippet"[^>]*>([^<]*)/g);
+          if (matches) {
+            matches.slice(0, 3).forEach(m => {
+              const text = m.replace(/class="result__snippet"[^>]*>/, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').trim();
+              if (text.length > 10) snippets.push(text);
+            });
+          }
+          if (snippets.length > 0) {
+            console.log(`[Web] Search "${query}" -> ${snippets.length} resultados`);
+            resolve(snippets.join(' | '));
+          } else {
+            resolve(null);
+          }
+        } catch (e) { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+// Enriquecer datos del dispositivo con busquedas web
+async function enriquecerConWeb(dispositivo) {
+  const webInfo = {};
+  const promises = [];
+
+  // Buscar fabricante por MAC online
+  if (dispositivo.mac && dispositivo.mac !== 'N/A') {
+    promises.push(
+      lookupMACOnline(dispositivo.mac).then(r => { if (r) webInfo.macVendor = r; })
+    );
+  }
+
+  // Buscar info del hostname
+  if (dispositivo.hostname && dispositivo.hostname !== 'Desconocido') {
+    const h = dispositivo.hostname.replace('.local', '');
+    promises.push(
+      searchWeb(`${h} device model network`).then(r => { if (r) webInfo.hostnameSearch = r; })
+    );
+  }
+
+  // Buscar info por fabricante + tipo
+  if (dispositivo.fabricante && dispositivo.fabricante !== 'Desconocido') {
+    promises.push(
+      searchWeb(`${dispositivo.fabricante} ${dispositivo.tipo} MAC OUI`).then(r => { if (r) webInfo.vendorSearch = r; })
+    );
+  }
+
+  await Promise.all(promises);
+  return webInfo;
+}
+
+// Identificacion de dispositivos usando LM Studio con gemma-4-e2b + datos web
+async function identificarConLMStudio(dispositivo) {
+  const LM_STUDIO_URL = 'http://localhost:1234/v1/chat/completions';
+
+  // Usar cache por MAC para evitar re-consultas
+  const cacheKey = dispositivo.mac + dispositivo.hostname;
+  if (lmCache.has(cacheKey)) {
+    console.log(`[LM Studio] Cache hit para ${dispositivo.ip}`);
+    return lmCache.get(cacheKey);
+  }
+
+  // Enriquecer con datos de internet
+  console.log(`[Web] Buscando info online para ${dispositivo.ip}...`);
+  const webData = await enriquecerConWeb(dispositivo);
+
+  let webContext = '';
+  if (webData.macVendor) webContext += `\n- Fabricante confirmado online: ${webData.macVendor}`;
+  if (webData.hostnameSearch) webContext += `\n- Info del hostname en internet: ${webData.hostnameSearch.substring(0, 300)}`;
+  if (webData.vendorSearch) webContext += `\n- Busqueda del fabricante: ${webData.vendorSearch.substring(0, 300)}`;
+
+  const prompt = `Eres un experto en identificacion de dispositivos de red. Analiza estos datos y devuelve EXACTAMENTE el modelo del dispositivo (ej: "iPhone 14 Pro", "Xiaomi Redmi Note 12", "Samsung Galaxy S23", "LG OLED C3", "Router TP-Link Archer AX50", "Smart TV Samsung 55\"", etc.).
+
+Datos del dispositivo:
+- IP: ${dispositivo.ip}
+- MAC: ${dispositivo.mac}
+- Fabricante (OUI): ${dispositivo.fabricante}
+- Hostname: ${dispositivo.hostname}
+- Puertos abiertos: ${(dispositivo.puertos || []).join(', ') || 'Ninguno'}
+- TTL: ${dispositivo.ttl || 'Desconocido'}
+- Tipo inferido: ${dispositivo.tipo}
+- MAC local (randomizada): ${dispositivo.macLocal ? 'Si' : 'No'}${webContext}
+
+Responde UNICAMENTE con el nombre exacto del modelo. Si no puedes identificar el modelo exacto, responde "Desconocido". No incluyas explicaciones.`;
+
+  return new Promise((resolve) => {
+    const postData = JSON.stringify({
+      model: 'google/gemma-4-e2b',
+      messages: [
+        { role: 'system', content: 'Eres un experto en identificacion precisa de dispositivos de red. Responde SOLO con el nombre exacto del modelo, sin explicaciones ni razonamiento.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.1,
+      max_tokens: 500,
+      stream: false
+    });
+
+    const req = http.request(LM_STUDIO_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      },
+      timeout: 15000
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const message = json.choices?.[0]?.message;
+          let content = message?.content?.trim();
+          // Modelos de razonamiento (gemma-4-e2b) pueden poner respuesta en reasoning_content
+          if (!content && message?.reasoning_content) {
+            content = message.reasoning_content.trim();
+          }
+          if (content && content !== 'Desconocido' && content.length > 2 && content.length < 120) {
+            // Limpiar razonamiento: extraer solo la linea con el modelo
+            const lines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+            const modelLine = lines.find(l => !l.toLowerCase().includes('thinking') && !l.toLowerCase().includes('process') && !l.toLowerCase().includes('analyze') && !l.toLowerCase().includes('determine') && !l.toLowerCase().includes('step'));
+            const final = modelLine || lines[lines.length - 1] || content;
+            const clean = final.replace(/^\d+\.\s*/, '').replace(/^-\s*/, '').replace(/^\*\s*/, '').trim();
+            if (clean && clean !== 'Desconocido' && clean.length > 2 && clean.length < 120) {
+              console.log(`[LM Studio] ${dispositivo.ip} -> ${clean}`);
+              lmCache.set(cacheKey, clean);
+              resolve(clean);
+              return;
+            }
+          }
+          lmCache.set(cacheKey, null);
+          resolve(null);
+        } catch (e) {
+          lmCache.set(cacheKey, null);
+          resolve(null);
+        }
+      });
+    });
+
+    req.on('error', () => { lmCache.set(cacheKey, null); resolve(null); });
+    req.on('timeout', () => { lmCache.set(cacheKey, null); req.destroy(); resolve(null); });
+    req.write(postData);
+    req.end();
+  });
+}
+
 function scanPort(ip, port, timeout = 1500) {
   return new Promise((resolve) => {
     const socket = new net.Socket();
@@ -1072,8 +1276,8 @@ async function obtenerDispositivos(gatewayIp) {
     if (!arpMap[ip]) arpMap[ip] = mac;
   }
 
-  // 11. Construir lista final
-  const dispositivos = [];
+  // 11. Construir lista preliminar
+  const dispositivosPre = [];
   for (const ip of activos) {
     let mac = arpMap[ip];
     if (!mac) {
@@ -1087,30 +1291,81 @@ async function obtenerDispositivos(gatewayIp) {
     const fabricante = mac !== 'N/A' ? lookupOUI(mac) : 'Desconocido';
     let tipo = detectarTipo(fabricante, ip, gatewayIp);
     let hostname = hostMap[ip] || 'Desconocido';
-    // Limpiar cualquier salto de linea residual
     hostname = hostname.replace(/\r\n/g, ' ').replace(/\n/g, ' ').replace(/\r/g, ' ').replace(/\s+/g, ' ').trim();
 
-    // Intentar identificar por puertos + TTL + MAC + hostname
     const puertos = portMap[ip] || [];
     const ttl = ttlMap[ip];
     const inferido = inferirDispositivoCompleto(puertos, mac, ttl, hostname);
     if (inferido) {
       if (hostname === 'Desconocido') hostname = inferido.nombre;
-      // Reemplazar tipo si es generico o menos especifico que la inferencia
       const genericos = ['Dispositivo Genérico', 'Dispositivo LG', 'Dispositivo Sony', 'Dispositivo Samsung', 'Dispositivo Apple', 'Dispositivo Xiaomi / Redmi', 'Dispositivo Huawei / Honor', 'Dispositivo OPPO', 'Dispositivo Vivo', 'Dispositivo OnePlus', 'Dispositivo Realme', 'Dispositivo Motorola', 'Dispositivo Nokia', 'Dispositivo Google / Nest', 'Dispositivo Amazon / Alexa', 'Dispositivo Microsoft'];
       if (genericos.includes(tipo)) tipo = inferido.tipo;
     }
 
-    dispositivos.push({
+    dispositivosPre.push({
       ip,
       mac,
       fabricante,
       tipo,
       estado: 'Activo',
       hostname,
-      puertos
+      puertos,
+      ttl,
+      macLocal: isLocalMAC(mac)
     });
   }
+
+  // 12. Aplicar base de datos local aprendida primero
+  for (const d of dispositivosPre) {
+    if (d.mac !== 'N/A' && deviceDB.has(d.mac)) {
+      const known = deviceDB.get(d.mac);
+      if (known && known !== 'Desconocido') {
+        d.hostname = known;
+        console.log(`[DB] ${d.ip} identificado por DB aprendida como: ${known}`);
+      }
+    }
+  }
+
+  // 13. Consultar LM Studio para dispositivos no identificados (excluyendo los ya en DB)
+  const genericosParaLM = ['Dispositivo Genérico', 'Movil/Tablet', 'Dispositivo LG', 'Dispositivo Sony', 'Dispositivo Samsung', 'Dispositivo Apple', 'Dispositivo Xiaomi / Redmi', 'Dispositivo Huawei / Honor', 'Dispositivo OPPO', 'Dispositivo Vivo', 'Dispositivo OnePlus', 'Dispositivo Realme', 'Dispositivo Motorola', 'Dispositivo Nokia', 'Dispositivo Google / Nest', 'Dispositivo Amazon / Alexa', 'Dispositivo Microsoft', 'Dispositivo con Web'];
+  const dispositivosParaLM = dispositivosPre.filter(d =>
+    (genericosParaLM.includes(d.tipo) || d.hostname === 'Desconocido') &&
+    d.mac !== 'N/A' && !deviceDB.has(d.mac)
+  );
+
+  if (dispositivosParaLM.length > 0) {
+    console.log(`[Dispositivos] Consultando LM Studio para ${dispositivosParaLM.length} dispositivos...`);
+    const lmResults = await runInBatches(dispositivosParaLM, async (d) => {
+      const lmName = await identificarConLMStudio(d);
+      return { ip: d.ip, mac: d.mac, lmName };
+    }, 3); // Solo 3 en paralelo para no saturar LM Studio
+
+    // Aplicar resultados de LM Studio y guardar en DB
+    for (const d of dispositivosPre) {
+      const lmResult = lmResults[d.ip];
+      if (lmResult && lmResult !== 'Desconocido') {
+        d.hostname = lmResult;
+        console.log(`[Dispositivos] ${d.ip} identificado por LM Studio como: ${lmResult}`);
+        // Guardar en DB local para aprendizaje futuro
+        if (d.mac !== 'N/A') {
+          deviceDB.set(d.mac, lmResult);
+        }
+      }
+    }
+    saveDeviceDB(deviceDB);
+    console.log(`[DB] Guardados ${dispositivosParaLM.length} dispositivos en base de datos local`);
+  }
+
+  // 14. Lista final
+  const dispositivos = dispositivosPre.map(d => ({
+    ip: d.ip,
+    mac: d.mac,
+    fabricante: d.fabricante,
+    tipo: d.tipo,
+    estado: d.estado,
+    hostname: d.hostname,
+    puertos: d.puertos
+  }));
 
   console.timeEnd('[Dispositivos] Tiempo total');
   return dispositivos.sort((a, b) => {
@@ -1120,4 +1375,276 @@ async function obtenerDispositivos(gatewayIp) {
   });
 }
 
-module.exports = { obtenerDatos, guardarTxt, obtenerDispositivos };
+// Convertir prefijo CIDR a mascara de red (ej: 24 -> 255.255.255.0)
+function cidrToMask(cidr) {
+  const bits = parseInt(cidr);
+  if (isNaN(bits) || bits < 0 || bits > 32) return '255.255.255.0';
+  const mask = (0xffffffff << (32 - bits)) >>> 0;
+  return [(mask >>> 24) & 0xff, (mask >>> 16) & 0xff, (mask >>> 8) & 0xff, mask & 0xff].join('.');
+}
+
+// Calcular rango de red a partir de IP y mascara
+function calcularRangoRed(ip, mascaraDecimal) {
+  const ipToInt = (ip) => ip.split('.').reduce((acc, octet) => ((acc << 8) + parseInt(octet)) >>> 0, 0);
+  const maskToInt = (mask) => mask.split('.').reduce((acc, octet) => ((acc << 8) + parseInt(octet)) >>> 0, 0);
+  const intToIp = (n) => [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff].join('.');
+
+  const ipInt = ipToInt(ip);
+  const maskInt = maskToInt(mascaraDecimal);
+  const networkInt = ipInt & maskInt;
+  const broadcastInt = networkInt | (~maskInt >>> 0);
+  const cidr = maskInt.toString(2).split('1').length - 1;
+
+  return {
+    network: intToIp(networkInt),
+    broadcast: intToIp(broadcastInt),
+    firstHost: intToIp(networkInt + 1),
+    lastHost: intToIp(broadcastInt - 1),
+    cidr,
+    range: `${intToIp(networkInt)}/${cidr}`,
+    totalHosts: broadcastInt - networkInt - 1
+  };
+}
+
+// Obtener informacion detallada de un dispositivo especifico (para el modal)
+async function obtenerInfoDetalladaDispositivo(targetIp) {
+  console.time(`[Detalle] ${targetIp}`);
+
+  // 1. Datos de red del escaner (en paralelo con ping)
+  const redPromise = obtenerDatos();
+
+  // 2. Ping para latencia y packet loss
+  const pingPromise = run(`ping -n 4 -w 1000 ${targetIp}`, 8000).catch(() => '');
+
+  // 3. Info de adaptadores de red locales (en paralelo) - usando PowerShell porque wmic esta deprecado
+  const nicPromise = run('powershell.exe -Command "Get-NetAdapter | Where-Object Status -eq \'Up\' | Select-Object Name, LinkSpeed | ConvertTo-Json -Compress"', 5000).catch(() => '');
+
+  // 4. Info WiFi (en paralelo)
+  const wifiPromise = run('netsh wlan show interfaces', 5000).catch(() => '');
+
+  // 5. TTL del dispositivo
+  const ttlPromise = getTTLFromPing(targetIp);
+
+  // 6. MAC desde ARP
+  const arpPromise = run(`arp -a ${targetIp}`, 3000).catch(() => '');
+
+  // 7. DHCP info del escaner
+  const dhcpPromise = run('ipconfig /all', 4000).catch(() => '');
+
+  // 8. NetBIOS name del dispositivo remoto
+  const netbiosPromise = run(`nbtstat -A ${targetIp}`, 5000).catch(() => '');
+
+  // 9. Traceroute al dispositivo
+  const traceroutePromise = run(`tracert -d -h 15 ${targetIp}`, 8000).catch(() => '');
+
+  // 10. Banner grabbing de puertos comunes
+  const bannerPromises = [22, 23, 80, 443, 445, 21, 25, 110, 143, 3306, 3389, 5900, 8080].map(port =>
+    grabBanner(targetIp, port).catch(() => null)
+  );
+
+  // Esperar todo en paralelo
+  const [red, pingOut, nicOut, wifiOut, ttl, arpOut, dhcpOut, netbiosOut, tracerouteOut, ...bannerResults] = await Promise.all([
+    redPromise, pingPromise, nicPromise, wifiPromise, ttlPromise, arpPromise,
+    dhcpPromise, netbiosPromise, traceroutePromise,
+    ...bannerPromises
+  ]);
+
+  // Parsear ping robusto (no depende de tildes ni codificación)
+  let latenciaMin = null, latenciaMax = null, latenciaAvg = null, packetLoss = null;
+  const timeMatches = pingOut.match(/=\s*(<1|\d+)ms/g);
+  if (timeMatches && timeMatches.length >= 3) {
+    const parseTime = (t) => t.includes('<1') ? 0 : parseInt(t.match(/\d+/)[0]);
+    latenciaMin = parseTime(timeMatches[0]);
+    latenciaMax = parseTime(timeMatches[1]);
+    latenciaAvg = parseTime(timeMatches[2]);
+  }
+  const lossMatch = pingOut.match(/(\d+)%\s*p[ée]rdida/i) || pingOut.match(/(\d+)%\s*loss/i);
+  if (lossMatch) packetLoss = parseInt(lossMatch[1]);
+
+  // Parsear NIC (formato JSON de PowerShell)
+  const adapters = [];
+  try {
+    const nicJson = JSON.parse(nicOut);
+    const nicArray = Array.isArray(nicJson) ? nicJson : [nicJson];
+    for (const nic of nicArray) {
+      if (nic && nic.Name) {
+        const speedStr = nic.LinkSpeed || '';
+        const speedMatch = speedStr.match(/(\d+)/);
+        const speedMbps = speedMatch ? parseInt(speedMatch[1]) : null;
+        adapters.push({ name: nic.Name.trim(), speedMbps });
+      }
+    }
+  } catch (e) {
+    // Fallback vacio
+  }
+
+  // Parsear WiFi (soporta formato con (Mbps) en medio)
+  let wifiInfo = null;
+  const ssidMatch = wifiOut.match(/SSID\s*:\s*(.+)/i);
+  const signalMatch = wifiOut.match(/Señal\s*:\s*(\d+)%/i) || wifiOut.match(/Signal\s*:\s*(\d+)%/i);
+  const rateMatch = wifiOut.match(/Velocidad de transmisi[óo]n(?:\s*\(Mbps\))?\s*:\s*(\d+)/i) || wifiOut.match(/Transmit rate\s*:\s*(\d+)/i) || wifiOut.match(/Rate\s*:\s*(\d+)/i);
+  const bandMatch = wifiOut.match(/Banda\s*:\s*(.+)/i) || wifiOut.match(/Band\s*:\s*(.+)/i);
+  if (ssidMatch) {
+    wifiInfo = {
+      ssid: ssidMatch[1].trim(),
+      signal: signalMatch ? parseInt(signalMatch[1]) : null,
+      rateMbps: rateMatch ? parseInt(rateMatch[1]) : null,
+      band: bandMatch ? bandMatch[1].trim() : null
+    };
+  }
+
+  // Parsear MAC desde ARP (entrada específica)
+  let mac = 'N/A';
+  const macMatch = arpOut.match(/([0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2})/i);
+  if (macMatch) mac = macMatch[1].replace(/-/g, ':').toUpperCase();
+
+  // Fallback 1: buscar en tabla ARP completa
+  if (mac === 'N/A') {
+    try {
+      const arpFull = await run('arp -a', 3000);
+      const lines = arpFull.split(/\r?\n/);
+      for (const line of lines) {
+        if (line.includes(targetIp)) {
+          const m = line.match(/([0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2})/i);
+          if (m) { mac = m[1].replace(/-/g, ':').toUpperCase(); break; }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Fallback 2: si es la propia máquina, obtener MAC de la interfaz Wi-Fi
+  if (mac === 'N/A' && red.ip.direccion === targetIp) {
+    try {
+      const localMac = (await run('powershell -NoProfile -Command "(Get-NetAdapter | Where-Object Status -eq \'Up\' | Select-Object -First 1 MacAddress).MacAddress"', 3000)).trim();
+      if (localMac && localMac.includes('-')) mac = localMac.replace(/-/g, ':').toUpperCase();
+    } catch (_) {}
+  }
+
+  // Fallback 3: forzar ping + esperar + ARP específico
+  if (mac === 'N/A') {
+    try {
+      await run(`ping -n 1 -w 500 ${targetIp}`, 3000);
+      await new Promise(r => setTimeout(r, 800));
+      const arpRetry = await run(`arp -a ${targetIp}`, 3000);
+      const macRetry = arpRetry.match(/([0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2}[-:][0-9a-fA-F]{2})/i);
+      if (macRetry) mac = macRetry[1].replace(/-/g, ':').toUpperCase();
+    } catch (_) {}
+  }
+
+  // TTL -> OS guess
+  const osGuess = ttl ? detectOSByTTL(ttl) : null;
+
+  // Parsear DHCP
+  let dhcpInfo = null;
+  const dhcpServidor = dhcpOut.match(/Servidor DHCP\s*[:.]\s*(\d+\.\d+\.\d+\.\d+)/i);
+  const dhcpHabilitado = dhcpOut.match(/DHCP habilitado\s*[:.]\s*(S[ií]|Yes)/i);
+  const dhcpLease = dhcpOut.match(/Concesi[óo]n obtenida\s*[:.]\s*(.+)/i);
+  const dhcpExpire = dhcpOut.match(/Concesi[óo]n expira\s*[:.]\s*(.+)/i);
+  if (dhcpServidor || dhcpHabilitado) {
+    dhcpInfo = {
+      servidor: dhcpServidor ? dhcpServidor[1].trim() : 'Desconocido',
+      habilitado: dhcpHabilitado ? 'Si' : 'No',
+      concesionObt: dhcpLease ? dhcpLease[1].trim() : 'N/A',
+      concesionExp: dhcpExpire ? dhcpExpire[1].trim() : 'N/A'
+    };
+  }
+
+  // Parsear NetBIOS
+  let netbiosName = null;
+  const nbMatch = netbiosOut.match(/(\S+)\s+<00>\s+UNIQUE/i);
+  if (nbMatch) netbiosName = nbMatch[1].trim();
+
+  // Parsear Traceroute
+  const tracerouteHops = [];
+  for (const line of tracerouteOut.split(/\r?\n/)) {
+    const m = line.match(/^\s*(\d+)\s+(\d+)\s*ms/i);
+    if (m) {
+      tracerouteHops.push({ hop: parseInt(m[1]), time: parseInt(m[2]) });
+    }
+  }
+
+  // Parsear banners
+  const banners = [];
+  const bannerPorts = [22, 23, 80, 443, 445, 21, 25, 110, 143, 3306, 3389, 5900, 8080];
+  for (let i = 0; i < bannerPorts.length; i++) {
+    if (bannerResults[i]) {
+      banners.push({ port: bannerPorts[i], banner: bannerResults[i].substring(0, 200) });
+    }
+  }
+
+  // Convertir mascara CIDR a formato decimal
+  const mascaraDecimal = red.ip.mascara && /^\d+$/.test(red.ip.mascara) ? cidrToMask(red.ip.mascara) : red.ip.mascara;
+
+  // Rango de red
+  let rangoRed = null;
+  if (red.ip.direccion && mascaraDecimal) {
+    rangoRed = calcularRangoRed(red.ip.direccion, mascaraDecimal);
+  }
+
+  console.timeEnd(`[Detalle] ${targetIp}`);
+
+  return {
+    ip: targetIp,
+    mac,
+    fabricante: mac !== 'N/A' ? lookupOUI(mac) : 'Desconocido',
+    ttl,
+    osGuess: osGuess ? osGuess.os : 'Desconocido',
+    latencia: {
+      min: latenciaMin,
+      max: latenciaMax,
+      avg: latenciaAvg,
+      packetLoss
+    },
+    redLocal: {
+      gateway: red.ip.gateway,
+      mascara: mascaraDecimal,
+      dns: red.ip.dns,
+      adaptadores: adapters,
+      wifi: wifiInfo,
+      rango: rangoRed,
+      interfaz: red.red ? red.red.nombre : 'Desconocido',
+      velocidadInternet: red.red && red.red.recepcion ? red.red.recepcion : 'Desconocido',
+      dhcp: dhcpInfo
+    },
+    netbiosName,
+    tracerouteHops,
+    banners,
+    online: latenciaAvg !== null
+  };
+}
+
+// Banner grabbing para detectar servicios/versiones
+async function grabBanner(ip, port) {
+  return new Promise((resolve, reject) => {
+    const net = require('net');
+    const socket = new net.Socket();
+    socket.setTimeout(3000);
+    let banner = '';
+
+    socket.connect(port, ip, () => {
+      if (port === 80 || port === 8080) {
+        socket.write('GET / HTTP/1.0\r\nHost: ' + ip + '\r\n\r\n');
+      } else if (port === 21) {
+        // FTP: el servidor envia banner automaticamente
+      } else if (port === 22) {
+        // SSH: el servidor envia banner automaticamente
+      } else {
+        socket.write('\r\n');
+      }
+    });
+
+    socket.on('data', (data) => {
+      banner += data.toString('utf-8', 0, Math.min(data.length, 512));
+      if (banner.length > 300) socket.destroy();
+    });
+
+    socket.on('error', () => reject());
+    socket.on('timeout', () => { socket.destroy(); reject(); });
+    socket.on('close', () => {
+      if (banner.trim().length > 0) resolve(banner.trim());
+      else reject();
+    });
+  });
+}
+
+module.exports = { obtenerDatos, guardarTxt, obtenerDispositivos, obtenerInfoDetalladaDispositivo, lookupOUI };

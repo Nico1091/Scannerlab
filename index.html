@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WiFi Analyzer AI | Analizador Corporativo de Red</title>
+  <title>NetPulse AI | Analizador Corporativo de Red</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -334,9 +334,15 @@
       background: rgba(255,255,255,0.03);
       border: 1px solid rgba(255,255,255,0.05);
       border-radius: 12px;
-      transition: background 0.2s;
+      transition: background 0.2s, border-color 0.2s, transform 0.2s;
+      cursor: pointer;
     }
-    .device-item:hover { background: rgba(255,255,255,0.06); }
+    .device-item:hover {
+      background: rgba(255,255,255,0.06);
+      border-color: rgba(255,255,255,0.12);
+      transform: translateY(-1px);
+    }
+    .device-item:active { transform: translateY(0) scale(0.995); }
     .device-icon {
       width: 36px; height: 36px;
       border-radius: 10px;
@@ -358,11 +364,19 @@
       font-weight: 600;
       color: #c7d2fe;
       margin-top: 2px;
+      line-height: 1.3;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      white-space: normal;
     }
     .device-meta {
       font-size: 0.7rem;
       color: var(--text-dim);
       margin-top: 2px;
+      line-height: 1.3;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      white-space: normal;
     }
     .device-badge {
       font-size: 0.6rem;
@@ -372,7 +386,26 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
       white-space: nowrap;
+      flex-shrink: 0;
     }
+    .device-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .btn-edit {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 2px;
+      font-size: 0.65rem;
+      opacity: 0.6;
+      transition: opacity 0.2s, color 0.2s;
+    }
+    .btn-edit:hover { opacity: 1; color: #fff; }
     .badge-router {
       background: rgba(59,130,246,0.12);
       color: #60a5fa;
@@ -436,6 +469,140 @@
       color: var(--text-dim);
       letter-spacing: 0.5px;
     }
+
+    /* Modal de informacion detallada del dispositivo */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      padding: 20px;
+    }
+    .modal-overlay.active {
+      display: flex;
+      opacity: 1;
+    }
+    .modal-box {
+      background: var(--bg-3);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      width: 100%;
+      max-width: 620px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 40px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
+      transform: translateY(20px) scale(0.96);
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .modal-overlay.active .modal-box {
+      transform: translateY(0) scale(1);
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 28px 16px;
+      border-bottom: 1px solid var(--glass-border);
+      position: sticky;
+      top: 0;
+      background: var(--bg-3);
+      z-index: 10;
+      border-radius: 20px 20px 0 0;
+    }
+    .modal-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .modal-title span {
+      color: var(--accent-cyan);
+      font-weight: 800;
+    }
+    .modal-close {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: var(--text-muted);
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 1.2rem;
+    }
+    .modal-close:hover {
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+    }
+    .modal-body {
+      padding: 20px 28px 28px;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .detail-item {
+      background: var(--glass);
+      border: 1px solid var(--glass-border);
+      border-radius: 14px;
+      padding: 14px 16px;
+    }
+    .detail-item.full-width {
+      grid-column: 1 / -1;
+    }
+    .detail-label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    .detail-value {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #fff;
+      word-break: break-word;
+    }
+    .detail-value.small {
+      font-size: 0.78rem;
+      font-weight: 500;
+    }
+    .detail-value.success { color: #34d399; }
+    .detail-value.warning { color: #fbbf24; }
+    .detail-value.danger { color: #fb7185; }
+    .detail-value.info { color: var(--accent-cyan); }
+    .detail-loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 40px;
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      grid-column: 1 / -1;
+    }
+    .detail-loading .spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255,255,255,0.1);
+      border-top-color: var(--accent-cyan);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @media (max-width: 540px) {
+      .detail-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -447,7 +614,7 @@
         <div class="logo-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
         </div>
-        <h1>WiFi Analyzer AI</h1>
+        <h1>NetPulse AI</h1>
       </div>
       <p>Analizador inteligente de red local</p>
     </header>
@@ -528,8 +695,23 @@
     </div>
 
     <footer>
-      WiFi Analyzer AI v1.0 &middot; Datos recolectados localmente &middot; Conectado a LM Studio localhost:1234
+      NetPulse AI v1.0 &middot; Datos recolectados localmente &middot; Conectado a LM Studio localhost:1234
     </footer>
+  </div>
+
+  <!-- Modal: Informacion detallada del dispositivo -->
+  <div class="modal-overlay" id="deviceModal" onclick="if(event.target===this)closeDeviceModal()">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">Informacion del dispositivo: <span id="modalDeviceName">--</span></div>
+        <button class="modal-close" onclick="closeDeviceModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="detail-grid" id="modalGrid">
+          <div class="detail-loading"><div class="spinner"></div>Cargando informacion detallada...</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -631,7 +813,10 @@
         const res = await fetch('/api/devices');
         const json = await res.json();
         if (!json.ok) throw new Error(json.error || 'Error del servidor');
+        window.lastDevices = json.data;
         renderDispositivos(json.data);
+        // Precargar detalles de todos los dispositivos en paralelo para acceso instantaneo
+        precargarDetallesDispositivos(json.data);
       } catch (err) {
         document.getElementById('contenido-devices').innerHTML = `
           <div class="empty-state" style="grid-column: 1 / -1;">
@@ -644,6 +829,29 @@
         btn.querySelector('span').textContent = 'Buscar Dispositivos';
         btn.classList.remove('btn-spin');
         loading.classList.remove('active');
+      }
+    }
+
+    // === Nombres personalizados de dispositivos (localStorage) ===
+    function getCustomName(mac, ip) {
+      const key = mac !== 'N/A' ? 'dev_' + mac : 'devip_' + ip;
+      try { return localStorage.getItem(key); } catch (e) { return null; }
+    }
+    function setCustomName(mac, ip, name) {
+      const key = mac !== 'N/A' ? 'dev_' + mac : 'devip_' + ip;
+      try {
+        if (name && name.trim()) localStorage.setItem(key, name.trim());
+        else localStorage.removeItem(key);
+      } catch (e) {}
+    }
+    function renameDevice(mac, ip, btnEl) {
+      const current = getCustomName(mac, ip) || '';
+      const nuevo = prompt('Nombre personalizado para este dispositivo:', current);
+      if (nuevo === null) return; // Cancel
+      setCustomName(mac, ip, nuevo);
+      // Re-renderizar la lista actual si esta disponible
+      if (window.lastDevices) {
+        renderDispositivos(window.lastDevices);
       }
     }
 
@@ -704,24 +912,38 @@
         const list = document.getElementById('list-' + conf.id);
         const item = document.createElement('div');
         item.className = 'device-item';
+        item.setAttribute('data-ip', d.ip);
+        item.onclick = function(e) {
+          // Evitar que el clic en el boton de editar abra el modal
+          if (e.target.closest('.btn-edit')) return;
+          openDeviceModal(d.ip, displayName);
+        };
+        const customName = getCustomName(d.mac, d.ip);
+        const displayName = customName || (() => {
+          let name = (d.hostname || 'Desconocido').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+          if (!name || name === 'Desconocido') {
+            if (d.fabricante !== 'Desconocido') name = d.fabricante + ' Device';
+            else if (d.tipo !== 'Dispositivo Genérico') name = d.tipo;
+            else name = 'Dispositivo ' + d.ip.split('.').pop();
+          }
+          return name;
+        })();
+        const nameColor = customName ? 'color:#a5f3fc;' : '';
         item.innerHTML = `
           <div class="device-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${conf.icon}"/></svg>
           </div>
           <div class="device-info">
             <div class="device-ip">${d.ip}</div>
-            ${(() => {
-              let name = (d.hostname || 'Desconocido').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
-              if (!name || name === 'Desconocido') {
-                if (d.fabricante !== 'Desconocido') name = d.fabricante + ' Device';
-                else if (d.tipo !== 'Dispositivo Genérico') name = d.tipo;
-                else name = 'Dispositivo ' + d.ip.split('.').pop();
-              }
-              return `<div class="device-hostname">${name}</div>`;
-            })()}
+            <div class="device-hostname" style="${nameColor}">${displayName}</div>
             <div class="device-meta">${d.mac} &middot; ${d.fabricante}${(d.puertos && d.puertos.length > 0) ? ' &middot; Puertos: ' + d.puertos.join(', ') : ''}</div>
           </div>
-          <span class="device-badge ${conf.badge}">${d.estado}</span>
+          <div class="device-actions">
+            <span class="device-badge ${conf.badge}">${d.estado}</span>
+            <button class="btn-edit" title="Renombrar dispositivo" onclick="renameDevice('${d.mac}', '${d.ip}', this)">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+          </div>
         `;
         list.appendChild(item);
       }
@@ -733,6 +955,159 @@
         }
       }
     }
+
+    // === Precarga de detalles en paralelo ===
+    window.deviceDetails = {};
+    async function precargarDetallesDispositivos(lista) {
+      window.deviceDetails = {};
+      const batchSize = 3;
+      for (let i = 0; i < lista.length; i += batchSize) {
+        const batch = lista.slice(i, i + batchSize);
+        await Promise.all(batch.map(async (d) => {
+          try {
+            const res = await fetch('/api/device/' + encodeURIComponent(d.ip));
+            const json = await res.json();
+            if (json.ok) window.deviceDetails[d.ip] = json.data;
+          } catch (e) {}
+        }));
+      }
+      console.log('[Frontend] Detalles precargados para', Object.keys(window.deviceDetails).length, 'dispositivos');
+    }
+
+    // === Modal de informacion detallada del dispositivo ===
+    function openDeviceModal(ip, displayName) {
+      const modal = document.getElementById('deviceModal');
+      const grid = document.getElementById('modalGrid');
+      const titleName = document.getElementById('modalDeviceName');
+
+      titleName.textContent = displayName || ip;
+      modal.classList.add('active');
+      document.body.style.overflow = 'hidden';
+
+      // Si ya tenemos detalles precargados, mostrarlos instantaneamente
+      if (window.deviceDetails && window.deviceDetails[ip]) {
+        renderDeviceDetails(window.deviceDetails[ip]);
+      } else {
+        grid.innerHTML = '<div class="detail-loading"><div class="spinner"></div>Cargando informacion detallada...</div>';
+        loadDeviceDetails(ip);
+      }
+    }
+
+    async function loadDeviceDetails(ip) {
+      const grid = document.getElementById('modalGrid');
+      try {
+        const res = await fetch('/api/device/' + encodeURIComponent(ip));
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error);
+        window.deviceDetails[ip] = json.data;
+        renderDeviceDetails(json.data);
+      } catch (err) {
+        grid.innerHTML = `<div class="detail-item full-width"><div class="detail-label">Error</div><div class="detail-value danger">${err.message}</div></div>`;
+      }
+    }
+
+    function renderDeviceDetails(d) {
+      const grid = document.getElementById('modalGrid');
+
+      const latClass = !d.latencia || d.latencia.avg === null ? 'danger' : d.latencia.avg < 10 ? 'success' : d.latencia.avg < 50 ? 'info' : 'warning';
+      const latText = !d.latencia || d.latencia.avg === null ? 'Sin respuesta (Offline o firewall)' : `${d.latencia.avg} ms (min: ${d.latencia.min || '-'}, max: ${d.latencia.max || '-'})`;
+
+      let html = '';
+
+      // === DISPOSITIVO ===
+      html += detailBlock('Direccion IP', d.ip);
+      const macDisplay = d.mac === 'N/A' ? 'No disponible (sin respuesta ARP)' : (d.mac || 'N/A');
+      html += detailBlock('Direccion MAC', macDisplay);
+      html += detailBlock('Fabricante (OUI)', d.fabricante || 'Desconocido');
+      if (d.netbiosName) {
+        html += detailBlock('Nombre NetBIOS', d.netbiosName, 'info');
+      }
+      html += detailBlock('TTL / Sistema Operativo', d.ttl ? `TTL ${d.ttl} — ${d.osGuess}` : 'Desconocido');
+      html += detailBlock('Estado', d.online ? 'Activo en linea' : 'Sin respuesta', d.online ? 'success' : 'danger');
+
+      // === LATENCIA ===
+      html += detailBlock('Latencia (Ping)', latText, latClass);
+      if (d.latencia && d.latencia.packetLoss !== null && d.latencia.packetLoss > 0) {
+        html += detailBlock('Perdida de paquetes', d.latencia.packetLoss + '%', 'warning');
+      }
+
+      // === RED LOCAL ===
+      if (d.redLocal) {
+        html += detailBlock('Puerta de Enlace (Gateway)', d.redLocal.gateway || 'Desconocido');
+        html += detailBlock('Mascara de Red', d.redLocal.mascara || 'Desconocido');
+        html += detailBlock('Servidores DNS', (d.redLocal.dns || []).join(', ') || 'Desconocido');
+
+        // Rango de red
+        if (d.redLocal.rango) {
+          const r = d.redLocal.rango;
+          html += detailBlock('Rango de Red', `${r.range} — ${r.totalHosts} hosts posibles`);
+          html += detailBlock('Broadcast', r.broadcast);
+        }
+
+        // Interfaz y velocidad de internet
+        html += detailBlock('Interfaz de Red', d.redLocal.interfaz || 'Desconocido');
+        html += detailBlock('Velocidad de Internet', d.redLocal.velocidadInternet || 'Desconocido');
+      }
+
+      // === WiFi ===
+      if (d.redLocal && d.redLocal.wifi) {
+        const w = d.redLocal.wifi;
+        const sigClass = w.signal > 80 ? 'success' : w.signal > 50 ? 'info' : 'warning';
+        html += detailBlock('Red WiFi (SSID)', w.ssid);
+        html += detailBlock('Senal WiFi', w.signal !== null ? w.signal + '%' : 'Desconocido', sigClass);
+        html += detailBlock('Velocidad WiFi', w.rateMbps ? w.rateMbps + ' Mbps' : 'Desconocido');
+        html += detailBlock('Banda', w.band || 'Desconocido');
+      }
+
+      // === Adaptadores ===
+      if (d.redLocal && d.redLocal.adaptadores && d.redLocal.adaptadores.length > 0) {
+        d.redLocal.adaptadores.forEach(a => {
+          html += detailBlock('Adaptador: ' + a.name, a.speedMbps ? a.speedMbps + ' Mbps' : 'Velocidad desconocida', 'small');
+        });
+      }
+
+      // === DHCP ===
+      if (d.redLocal && d.redLocal.dhcp) {
+        const dhcp = d.redLocal.dhcp;
+        html += detailBlock('Servidor DHCP', dhcp.servidor);
+        html += detailBlock('DHCP Habilitado', dhcp.habilitado);
+        if (dhcp.concesionObt !== 'N/A') html += detailBlock('Concesion obtenida', dhcp.concesionObt, 'small');
+        if (dhcp.concesionExp !== 'N/A') html += detailBlock('Concesion expira', dhcp.concesionExp, 'small');
+      }
+
+      // === TRACEROUTE ===
+      if (d.tracerouteHops && d.tracerouteHops.length > 0) {
+        const hopsText = d.tracerouteHops.map(h => `Hop ${h.hop}: ${h.time}ms`).join(' → ');
+        html += detailBlock('Ruta (Traceroute)', hopsText, 'small');
+      }
+
+      // === BANNERS / SERVICIOS ===
+      if (d.banners && d.banners.length > 0) {
+        d.banners.forEach(b => {
+          const cleanBanner = b.banner.replace(/[\r\n]+/g, ' ').substring(0, 120);
+          html += detailBlock('Puerto ' + b.port, cleanBanner, 'small');
+        });
+      }
+
+      grid.innerHTML = html;
+    }
+
+    function detailBlock(label, value, valueClass) {
+      const cls = valueClass ? 'detail-value ' + valueClass : 'detail-value';
+      const val = value !== undefined && value !== null ? value : 'Desconocido';
+      return `<div class="detail-item"><div class="detail-label">${label}</div><div class="${cls}">${val}</div></div>`;
+    }
+
+    function closeDeviceModal() {
+      const modal = document.getElementById('deviceModal');
+      modal.classList.remove('active');
+      document.body.style.overflow = '';
+    }
+
+    // Cerrar modal con Escape
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeDeviceModal();
+    });
 
     // Auto-scan al cargar
     window.addEventListener('DOMContentLoaded', () => {
