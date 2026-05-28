@@ -1662,4 +1662,28 @@ async function pingLive(ip, timeout = 1000) {
   }
 }
 
-module.exports = { obtenerDatos, guardarTxt, obtenerDispositivos, obtenerInfoDetalladaDispositivo, lookupOUI, pingLive };
+// Obtener solo datos WiFi actuales (rapido, para en vivo)
+async function obtenerWiFiLive() {
+  try {
+    const out = await run('netsh wlan show interfaces', 3000);
+    const signal    = extract(out, /Se[ñn]al\s*:\s*(.+)/i);
+    const reception = extract(out, /Velocidad de recepci[óo]n \(Mbps\)\s*:\s*(\d+)/i);
+    const transmission = extract(out, /Velocidad de transmisi[óo]n \(Mbps\)\s*:\s*(\d+)/i);
+    const channel = extract(out, /Canal\s*:\s*(\d+)/i);
+    const ssid    = extract(out, /SSID\s*:\s*(.+)/i);
+    const radio   = extract(out, /Tipo de radio\s*:\s*(.+)/i);
+    return {
+      ok: true,
+      senial: signal || 'N/A',
+      recepcion: reception ? parseInt(reception) : null,
+      transmision: transmission ? parseInt(transmission) : null,
+      canal: channel || 'N/A',
+      ssid: ssid || 'N/A',
+      tecnologia: radio || 'N/A'
+    };
+  } catch (e) {
+    return { ok: false, senial: 'N/A', recepcion: null, transmision: null, canal: 'N/A', ssid: 'N/A', tecnologia: 'N/A' };
+  }
+}
+
+module.exports = { obtenerDatos, guardarTxt, obtenerDispositivos, obtenerInfoDetalladaDispositivo, lookupOUI, pingLive, obtenerWiFiLive };

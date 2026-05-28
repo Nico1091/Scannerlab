@@ -458,6 +458,73 @@
       letter-spacing: 0.5px;
     }
 
+    /* Live strip - KPIs en vivo */
+    .live-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+    .live-kpi {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      position: relative;
+      overflow: hidden;
+      transition: box-shadow 0.2s;
+      box-shadow: var(--shadow-soft);
+    }
+    .live-kpi:hover { box-shadow: var(--shadow-hover); }
+    .live-kpi::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 20px;
+      width: 40px; height: 2px;
+      border-radius: 0 0 4px 4px;
+      background: linear-gradient(90deg, var(--accent-sage), var(--accent-steel));
+    }
+    .live-kpi .kpi-label {
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .live-kpi .kpi-label svg { width: 14px; height: 14px; opacity: 0.5; }
+    .live-kpi .kpi-value {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: var(--text);
+      letter-spacing: -0.5px;
+    }
+    .live-kpi .kpi-value.good { color: #5E7568; }
+    .live-kpi .kpi-value.warn { color: #9A8250; }
+    .live-kpi .kpi-value.danger { color: #9E6A6A; }
+    .live-kpi .kpi-value.info { color: var(--accent-steel); }
+    .live-kpi .kpi-sub {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .live-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent-sage);
+      box-shadow: 0 0 6px rgba(138,158,142,0.4);
+      animation: livePulse 2s ease-in-out infinite;
+    }
+    @keyframes livePulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
+    }
+
     /* Modal de informacion detallada del dispositivo */
     .modal-overlay {
       position: fixed;
@@ -607,6 +674,30 @@
       <p>Analizador inteligente de red local</p>
     </header>
 
+    <!-- Live strip: metricas en vivo -->
+    <div class="live-strip" id="liveStrip">
+      <div class="live-kpi">
+        <div class="kpi-label"><span class="live-dot"></span> Señal WiFi</div>
+        <div class="kpi-value" id="liveSignal">-</div>
+        <div class="kpi-sub" id="liveSignalSub">en vivo</div>
+      </div>
+      <div class="live-kpi">
+        <div class="kpi-label"><span class="live-dot"></span> Velocidad WiFi</div>
+        <div class="kpi-value" id="liveWiFiSpeed">-</div>
+        <div class="kpi-sub" id="liveWiFiSpeedSub">en vivo</div>
+      </div>
+      <div class="live-kpi">
+        <div class="kpi-label"><span class="live-dot"></span> Velocidad Internet</div>
+        <div class="kpi-value info" id="liveNetSpeed">-</div>
+        <div class="kpi-sub" id="liveNetSpeedSub">en vivo</div>
+      </div>
+      <div class="live-kpi">
+        <div class="kpi-label"><span class="live-dot"></span> Latencia Gateway</div>
+        <div class="kpi-value good" id="liveGateway">-</div>
+        <div class="kpi-sub" id="liveGatewaySub">en vivo</div>
+      </div>
+    </div>
+
     <!-- Microventana 1: Informacion del router / red -->
     <div class="card" id="card-red" style="animation-delay: 0.1s;">
       <div class="card-accent-top"></div>
@@ -737,6 +828,7 @@
     function renderDatos(d) {
       const wifi = d.red;
       const ip = d.ip;
+      window.gatewayIp = ip.gateway || null;
       document.getElementById('contenido-red').innerHTML = `
         <div class="grid">
           <div class="field">
@@ -1134,10 +1226,87 @@
       if (e.key === 'Escape') closeDeviceModal();
     });
 
+    // === Metricas en vivo ===
+    async function loadWiFiLive() {
+      try {
+        const res = await fetch('/api/wifi/live');
+        const json = await res.json();
+        if (!json.ok) return;
+        const signalEl = document.getElementById('liveSignal');
+        const speedEl = document.getElementById('liveWiFiSpeed');
+        const sigSub = document.getElementById('liveSignalSub');
+        const speedSub = document.getElementById('liveWiFiSpeedSub');
+
+        if (signalEl) {
+          const sig = json.senial || 'N/A';
+          signalEl.textContent = sig;
+          const pct = parseInt(sig);
+          signalEl.className = 'kpi-value ' + (!isNaN(pct) ? (pct >= 70 ? 'good' : pct >= 40 ? 'warn' : 'danger') : '');
+          if (sigSub) sigSub.textContent = json.tecnologia + (json.canal ? ' / canal ' + json.canal : '');
+        }
+        if (speedEl) {
+          const rx = json.recepcion, tx = json.transmision;
+          if (rx && tx) {
+            speedEl.textContent = rx + ' / ' + tx + ' Mbps';
+            speedSub.textContent = 'Rx / Tx';
+          } else {
+            speedEl.textContent = 'N/A';
+            speedSub.textContent = 'sin datos';
+          }
+        }
+      } catch (e) {}
+    }
+
+    async function loadNetSpeed() {
+      try {
+        const res = await fetch('/api/speed');
+        const json = await res.json();
+        const el = document.getElementById('liveNetSpeed');
+        const sub = document.getElementById('liveNetSpeedSub');
+        if (!el) return;
+        if (json.ok && json.mbps !== null) {
+          el.textContent = json.mbps + ' Mbps';
+          el.className = 'kpi-value info';
+          if (sub) sub.textContent = json.cached ? 'en vivo (cache)' : 'en vivo';
+        } else {
+          el.textContent = 'N/A';
+          el.className = 'kpi-value danger';
+          if (sub) sub.textContent = 'sin conexion';
+        }
+      } catch (e) {}
+    }
+
+    async function loadGatewayPing() {
+      if (!window.gatewayIp) return;
+      try {
+        const res = await fetch('/api/ping/' + encodeURIComponent(window.gatewayIp));
+        const json = await res.json();
+        const el = document.getElementById('liveGateway');
+        const sub = document.getElementById('liveGatewaySub');
+        if (!el) return;
+        if (json.ok && json.ms !== null) {
+          el.textContent = json.ms + ' ms';
+          el.className = 'kpi-value ' + (json.ms < 10 ? 'good' : json.ms < 50 ? 'info' : 'warn');
+          if (sub) sub.textContent = window.gatewayIp;
+        } else {
+          el.textContent = 'Sin respuesta';
+          el.className = 'kpi-value danger';
+          if (sub) sub.textContent = window.gatewayIp || 'gateway';
+        }
+      } catch (e) {}
+    }
+
     // Auto-scan al cargar
     window.addEventListener('DOMContentLoaded', () => {
       escanearRed();
       escanearDispositivos();
+      // Iniciar polling de metricas en vivo
+      loadWiFiLive();
+      loadNetSpeed();
+      loadGatewayPing();
+      setInterval(loadWiFiLive, 5000);
+      setInterval(loadNetSpeed, 20000);
+      setInterval(loadGatewayPing, 5000);
     });
   </script>
 </body>

@@ -1,7 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { obtenerDatos, obtenerDispositivos, obtenerInfoDetalladaDispositivo, lookupOUI, pingLive } = require('./escaneo');
+const { obtenerDatos, obtenerDispositivos, obtenerInfoDetalladaDispositivo, lookupOUI, pingLive, obtenerWiFiLive } = require('./escaneo');
 
 // Manejo de errores no capturados para evitar crash del servidor
 process.on('uncaughtException', (err) => {
@@ -15,6 +15,48 @@ let PORT = 3001;
 
 // Cache del ultimo escaneo de dispositivos (para pasar MAC al endpoint de detalle)
 let lastDeviceCache = {};
+
+// Cache de velocidad de internet (30 segundos)
+let speedCache = { mbps: null, timestamp: 0, testing: false };
+
+async function measureInternetSpeed() {
+  const now = Date.now();
+  if (speedCache.mbps !== null && (now - speedCache.timestamp) < 30000) {
+    return { ok: true, mbps: speedCache.mbps, cached: true };
+  }
+  if (speedCache.testing) {
+    while (speedCache.testing) { await new Promise(r => setTimeout(r, 200)); }
+    return { ok: speedCache.mbps !== null, mbps: speedCache.mbps, cached: true };
+  }
+  speedCache.testing = true;
+  try {
+    const https = require('https');
+    const result = await new Promise((resolve) => {
+      const start = Date.now();
+      const req = https.get('https://speed.cloudflare.com/__down?bytes=200000', { timeout: 10000 }, (res) => {
+        let bytes = 0;
+        res.on('data', chunk => { bytes += chunk.length; });
+        res.on('end', () => {
+          const elapsedSec = (Date.now() - start) / 1000;
+          if (elapsedSec < 0.1) { resolve(null); return; }
+          const mbps = ((bytes * 8) / elapsedSec) / 1_000_000;
+          resolve(mbps);
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+    });
+    if (result !== null) {
+      speedCache.mbps = Math.round(result * 10) / 10;
+      speedCache.timestamp = Date.now();
+      console.log('[SpeedTest] ' + speedCache.mbps + ' Mbps');
+      return { ok: true, mbps: speedCache.mbps };
+    }
+    return { ok: false, mbps: null, error: 'Sin conexion a internet o timeout' };
+  } finally {
+    speedCache.testing = false;
+  }
+}
 
 const MIME = {
   '.html': 'text/html',
@@ -98,6 +140,32 @@ function startServer(port) {
         const ms = await pingLive(targetIp);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, ms }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
+    // Endpoint: datos WiFi en vivo (senial, velocidad, canal)
+    if (req.url === '/api/wifi/live') {
+      try {
+        const info = await obtenerWiFiLive();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(info));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
+    // Endpoint: velocidad de internet
+    if (req.url === '/api/speed') {
+      try {
+        const result = await measureInternetSpeed();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: err.message }));
