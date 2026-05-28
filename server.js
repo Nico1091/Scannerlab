@@ -1,7 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { obtenerDatos, obtenerDispositivos, obtenerInfoDetalladaDispositivo, lookupOUI } = require('./escaneo');
+const { obtenerDatos, obtenerDispositivos, obtenerInfoDetalladaDispositivo, lookupOUI, pingLive } = require('./escaneo');
 
 // Manejo de errores no capturados para evitar crash del servidor
 process.on('uncaughtException', (err) => {
@@ -83,6 +83,21 @@ function startServer(port) {
         }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, data: info }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
+    // Endpoint: ping en vivo a una IP
+    const pingMatch = req.url.match(/^\/api\/ping\/(.+)$/);
+    if (pingMatch) {
+      const targetIp = decodeURIComponent(pingMatch[1]);
+      try {
+        const ms = await pingLive(targetIp);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ms }));
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: err.message }));

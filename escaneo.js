@@ -1647,4 +1647,19 @@ async function grabBanner(ip, port) {
   });
 }
 
-module.exports = { obtenerDatos, guardarTxt, obtenerDispositivos, obtenerInfoDetalladaDispositivo, lookupOUI };
+// Ping en vivo: un solo paquete, devuelve latencia en ms o null
+async function pingLive(ip, timeout = 1000) {
+  try {
+    const out = await run(`ping -n 1 -w ${timeout} ${ip}`, timeout + 500);
+    const m = out.match(/tiempo[<=](\d+)ms/i) || out.match(/time[<=](\d+)ms/i);
+    if (m) return parseInt(m[1]);
+    // Fallback para <1ms
+    const m2 = out.match(/tiempo[<]1ms/i) || out.match(/time[<]1ms/i);
+    if (m2) return 0;
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+module.exports = { obtenerDatos, guardarTxt, obtenerDispositivos, obtenerInfoDetalladaDispositivo, lookupOUI, pingLive };
